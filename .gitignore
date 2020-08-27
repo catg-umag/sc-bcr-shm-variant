@@ -1,0 +1,11 @@
+# editor stuff
+.vscode/
+
+# pipeline stuff
+.nextflow/
+.nextflow.log*
+input
+output*/
+*.html
+*.txt
+params.yml
