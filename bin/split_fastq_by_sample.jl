@@ -11,7 +11,6 @@ function main()
     args = parse_arguments()
 
     # load data
-    corrections = JSON.parsefile(args["corrections"])
     subjects_from_cell = load_subject_index(args["index"], args["experiment"])
     subjects = collect(Set(values(subjects_from_cell)))
 
@@ -23,12 +22,12 @@ function main()
         for subject in vcat(subjects, "NA")
     )
 
-    for (r1, r2) in zip(
+    for (barcodes, r1, r2) in zip(
+        CSV.File(args["barcodes"]),
         FASTQ.Reader(auto_gzopen(args["reads_r1"])),
         FASTQ.Reader(auto_gzopen(args["reads_r2"])),
     )
-        cell = corrections["cells"][string(get_barcode_seq(r1))]
-        umi = string(get_umi_seq(r1))
+        cell = barcodes.cell
 
         if !isnothing(cell) && haskey(subjects_from_cell, cell)
             subject = subjects_from_cell[cell]
@@ -36,11 +35,7 @@ function main()
             subject = "NA"
         end
 
-        if haskey(corrections["umis"], cell) && haskey(corrections["umis"][cell], umi)
-            umi = corrections["umis"][cell][umi]
-        end
-
-        write_record(fastq_writers[subject], r1, r2, args["experiment"], cell, umi)
+        write_record(fastq_writers[subject], r1, r2, args["experiment"], cell, barcodes.umi)
     end
 
     # close writers
@@ -79,6 +74,9 @@ function parse_arguments()
             help = "R2 reads"
             dest_name = "reads_r2"
             required = true
+        "--barcodes", "-b"
+            help = "Cell/UMI barcodes in a CSV file"
+            required = true
         "--index", "-i"
             help = "experiment/cell/cluster index"
             required = true
@@ -86,9 +84,6 @@ function parse_arguments()
             help = "experiment name"
             required = true
             dest_name = "experiment"
-        "--corrections", "-c"
-            help = "Cell/UMI barcode corrections"
-            required = true
     end
 
     return parse_args(s)

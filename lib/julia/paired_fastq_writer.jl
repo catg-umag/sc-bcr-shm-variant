@@ -25,20 +25,9 @@ end
     experiment::String,
     cell::Union{String,Nothing},
     umi::Union{String,Nothing},
-    extra_offset::Int = 20,
 )
-    # delete this from 5' R1 (cell BC, UMI and some extra nucleotides)
-    offset = 26 + extra_offset + 1
 
-    write(
-        writer.r1,
-        FASTQ.Record(
-            identifier(r1),
-            description(r1),
-            sequence(r1)[offset:end],
-            quality(r1)[offset:end],
-        ),
-    )
+    write(writer.r1, r1)
     write(writer.r2, r2)
     write(writer.info, "$(experiment),$(identifier(r1)),$(cell),$(umi)\n")
 end

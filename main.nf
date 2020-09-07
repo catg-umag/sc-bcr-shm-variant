@@ -1,147 +1,262 @@
+#!/usr/bin/env nextflow
+nextflow.enable.dsl=2
+
+include { build_cutadapt_args } from './lib/nextflow/utils'
+
+
+/*
+ * Prepare inputs
+ */
 cell_index = file(params.cell_index)
 cell_whitelist = file(params.cell_whitelist)
 
 channel
   .fromPath(params.references)
-  .splitFasta( record: [id: true, sequence: true])
-  .collectFile( storeDir: 'output/references ') {
-    ["${it.id.split("_")[0]}.fasta", ">${it.id}\n${it.sequence}"]
+  .splitFasta(record: [id: true, sequence: true])
+  .collectFile(storeDir: 'output/references') {
+    ["${it.id.replaceFirst(/_[HL]C/, '') }.fasta", ">${it.id}\n${it.sequence}"]
   }
   .map { [it.baseName, it] }
-  .set { references_ch }
+  .set { references }
 
 channel
   .fromList(params.data)
-  .map { [it.name, file("$HOME" + it.fastq.replace('$HOME', ''))]}
-  .into { reads_ch; reads_ch2 }
+  .map { ["${it.name}_L${it.lane}", file("$HOME" + it.fastq.replace('$HOME', ''))]}
+  .set { reads }
 
 
-// /*
-//  * Corrects barcodes and saves them in a JSON file.
-//  */
-// process getBarcodeCorrections {
-//   tag "$name"
-//   publishDir "output/bc_corrections/", pattern: '*.json', mode: 'copy'
-
-//   input:  
-//   tuple val(name), path(reads) from reads_ch
-//   path cell_whitelist
-
-//   output:
-//   tuple val(name), path(reads), path("corrections_${name}.json") into reads_w_corrections_ch
-
-//   script:
-//   (r1, r2) = reads.sort { it.simpleName }
-//   """
-//   get_barcode_corrections.jl $r1 $cell_whitelist -o corrections_${name}.json
-//   """
-// }
-
-
-// /*
-//  * Splits FASTQ files by subject
-//  */
-// process splitFastqBySample {
-//   tag "$name"
-//   publishDir "output/fastq_by_sample/$name/", mode: 'copy'
-//   cpus 4
-
-//   input:
-//   tuple val(name), path(reads), path(corrections) from reads_w_corrections_ch
-//   path cell_index
-
-//   output:
-//   path("*") into sample_fastqs_ch
-
-//   script:
-//   (r1, r2) = reads.sort { it.simpleName }
-//   """
-//   split_fastq_by_sample.jl --r1 $r1 --r2 $r2 -i $cell_index -n $name -c $corrections
-//   pigz -p ${task.cpus} *.fastq
-//   """
-// }
-
-
-// sample_fastqs_ch
-//   .flatMap { it.collate(3) }
-//   .map { [it[0].simpleName.replaceAll(/.*_/, ''), [it[0], it[1]], it[2]] }
-//   .filter { it[0] ==~ /S\d+/ }
-//   .set { subject_data_ch }
-
-
-// subject_data_ch
-//   .map { [it[0], it[1]] }
-//   .join(references_ch)
-//   .set { reads_withref_ch }
-
-
-// process mapping {
-//   tag "$subject"
-
-//   input:
-//   tuple val(subject), path(reads), path(reference) from reads_withref_ch
-
-//   output:
-//   tuple val(subject), file("${subject}.sam") into mapped_sequences
-
-//   script:
-//   """
-//   minimap2 -a -xsr -k8 -w5 -A2 -B2 -O5,24 -E4,2 -t2 $reference $reads > ${subject}.sam
-//   """
-// }
-
-
-// process sortAndConvert {
-//   tag "$subject"
-//   publishDir "output/bam/${subject}", mode: 'copy'
-
-//   input:
-//   tuple val(subject), file(sam) from mapped_sequences
-  
-//   output:
-//   file "${subject}.bam"
-//   file "${subject}.bam.bai"
-  
-//   script:
-//   """
-//   samtools sort $sam -o ${subject}.bam
-//   samtools index ${subject}.bam
-//   """
-// }
-
-
-process cutAdapt {
+/*
+ * Corrects barcodes and saves them in a JSON file.
+ */
+process getBarcodeCorrections {
   tag "$name"
-  publishDir "output/cutadapt/${name}", mode: 'copy'
+  publishDir "output/bc_corrections/", pattern: '*.json', mode: 'copy'
+
+  input:  
+  tuple val(name), path(reads)
+  path cell_whitelist
+
+  output:
+  tuple val(name), path("corrections_${name}.json")
+
+  script:
+  (r1, r2) = reads.sort { it.simpleName }
+  """
+  get_barcode_corrections.jl $r1 $cell_whitelist -o corrections_${name}.json
+  """
+}
+
+
+/*
+ * Extracts barcodes from FASTQ applying correction
+ */
+process extractBarcodes {
+  tag "$name"
+
+  input:
+  tuple val(name), path(reads), path(corrections)
+
+  output:
+  tuple val(name), path("${name}.r1.fastq.gz"), path(r2), emit: reads
+  tuple val(name), path("${name}_barcodes.csv"), emit: barcodes
+
+  script:
+  (r1, r2) = reads.sort { it.simpleName }
+  """
+  extract_barcodes.jl -r ${name}.r1.fastq.gz -b ${name}_barcodes.csv -c $corrections $r1
+  """
+}
+
+
+/*
+ * Clean the sequence of primer sequences
+ */
+process trimAdaptersCutAdapt {
+  tag "$name"
+  publishDir 'output/cutadapt/', pattern: '*.txt', mode: 'copy'
   cpus 8
 
   input:
-  tuple val(name), path(reads) from reads_ch2
+  tuple val(name), path(fastq_r1), path(fastq_r2)
 
   output:
-  path("*")
+  tuple val(name), path("*_clean.*.fastq.gz"), emit: reads
+  path "${name}_report.txt", emit: report
   
   script:
-  (r1, r2) = reads.sort { it.simpleName }
+  cutadapt_primers = build_cutadapt_args(params.primers)
   """
   cutadapt \
     -e 0.12 \
     --times 3 \
     --overlap 5 \
-    -j ${task.cpus} \
+    -m 20 \
+    -j ${task.cpus / 2} \
     -f fastq \
-    -o "${name}_clean.R1.fastq.gz" \
-    -p "${name}_clean.R2.fastq.gz" \
-    -g spacer=TTTCTTATATGGG \
-    -a R2_rc=AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC \
-    -a P7_rc=ATCTCGTATGCCGTCTTCTGCTTG \
-    -a polyA=AAAAAAAAAAAAAAAAAAAA \
-    -a rt_primer=AAGCAGTGGTATCAACGCAGAGTACAT \
-    -A spacer_rc=CCCATATAAGAAA \
-    -A R1_rc=AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT \
-    -A P5_rc=AGATCTCGGTGGTCGCCGTATCATT \
-    -A polyA=AAAAAAAAAAAAAAAAAAAA \
-    -A rt_primer=AAGCAGTGGTATCAACGCAGAGTACAT \
-    ${r1} ${r2} > report.txt
+    -o ${name}_clean.R1.fastq.gz \
+    -p ${name}_clean.R2.fastq.gz \
+    ${cutadapt_primers} \
+    ${fastq_r1} ${fastq_r2} > ${name}_report.txt
   """
-} 
+}
+
+
+/*
+ * Trims adapters (automatic) and clean remaining FASTQ files
+ */
+process trimAdapters {
+  tag "$name"
+  publishDir 'output/fastp/', pattern: "${name}_report*", mode: 'copy'
+  cpus 4
+
+  input:
+  tuple val(name), path(fastq_r1), path(fastq_r2)
+
+  output:
+  tuple val(name), path("*_clean.*.fastq.gz"), emit: reads
+  tuple path("${name}_report.html"), path("${name}_report.json"), emit: report
+  
+  script:
+  """
+  fastp \
+    -i ${fastq_r1} -I ${fastq_r2} \
+    -o ${name}_clean.R1.fastq.gz -O ${name}_clean.R2.fastq.gz \
+    -c -g \
+    -w ${task.cpus} \
+    -j ${name}_report.json -h ${name}_report.html
+  """
+}
+
+
+/*
+ * Splits FASTQ files by subject
+ */
+process splitFastqBySample {
+  tag "$name"
+  cpus 4
+
+  input:
+  tuple val(name), path(reads), path(barcodes)
+  path cell_index
+
+  output:
+  tuple path("*.r1.fastq.gz*"), path("*.r2.fastq.gz"), path("*_info.csv")
+
+  script:
+  (r1, r2) = reads.sort { it.simpleName }
+  exp = name.replaceAll(/_L\d+$/, '')
+  """
+  split_fastq_by_sample.jl --r1 $r1 --r2 $r2 -b $barcodes -i $cell_index -n $exp
+  pigz -p ${task.cpus} *.fastq
+  """
+}
+
+
+/*
+ * Merges files from same experiment/subject but different lane
+ */
+process mergeLanes {
+  tag "$name"
+  publishDir "output/fastq_by_sample/$exp/$subject/", mode: 'copy'
+
+  input:
+  tuple \
+    val(name), \
+    path(r1, stageAs: 'r1_*.fastq.gz'), \
+    path(r2, stageAs: 'r2_*.fastq.gz'), \
+    path(info, stageAs: 'info_*.csv')
+
+  output:
+  tuple val(name), path("${name}.r?.fastq.gz"), emit: reads
+  tuple val(name), path("${name}_info.csv"), emit: info
+
+  script:
+  (exp, subject) = name.split('_')
+  if (r1.size() > 1)
+    """
+    cat $r1 > ${name}.r1.fastq.gz
+    cat $r2 > ${name}.r2.fastq.gz
+    cat $info > ${name}_info.csv
+    """
+  else
+    """
+    cp $r1 ${name}.r1.fastq.gz
+    cp $r2 ${name}.r2.fastq.gz
+    cp $info ${name}_info.csv
+    """
+}
+
+
+/*
+ * Maps reads against reference
+ */
+process mapping {
+  tag "$subject"
+  cpus 4
+
+  input:
+  tuple val(subject), path(reads), path(reference)
+
+  output:
+  tuple val(subject), file("${subject}.sam")
+
+  script:
+  """
+  minimap2 -a -xsr -k8 -w5 -A2 -B2 -O5,24 -E4,2 -t ${task.cpus} $reference $reads > ${subject}.sam
+  """
+}
+
+
+/*
+ * Sort SAM files and convert them to BAM
+ */
+process sortAndConvert {
+  tag "$subject"
+  publishDir "output/bam/${subject}", mode: 'copy'
+  cpus 4
+
+  input:
+  tuple val(subject), file(sam)
+  
+  output:
+  tuple path("${subject}.bam"), path("${subject}.bam.bai")
+  
+  script:
+  """
+  samtools sort -@ ${task.cpus} $sam -o ${subject}.bam
+  samtools index ${subject}.bam
+  """
+}
+
+
+workflow {
+  getBarcodeCorrections(reads, cell_whitelist)
+
+  extractBarcodes(reads.join(getBarcodeCorrections.out))
+  
+  // trimAdapters(extractBarcodes.out.reads)
+  // splitFastqBySample(trimAdapters.out.reads.join(extractBarcodes.out.barcodes), cell_index)
+
+  // no barcode trimming (temporary)
+  extractBarcodes.out.reads
+    .map { [it[0], [it[1], it[2]]] }
+    .join(extractBarcodes.out.barcodes)
+    .set { reads_with_barcodes }
+
+  splitFastqBySample(reads_with_barcodes, cell_index)
+
+  splitFastqBySample.out
+    .transpose()
+    .map { [it[0].simpleName.replaceAll(/_L\d+$/, '')] + it }
+    .groupTuple()
+    .set { grouped_lanes }
+
+  mergeLanes(grouped_lanes)
+
+  mergeLanes.out.reads
+    .filter { it[0] =~ /K?B_S\d+/ }
+    .join(references)
+    .set { reads_with_ref }
+
+  sortAndConvert(mapping(reads_with_ref))
+}
