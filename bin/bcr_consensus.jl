@@ -1,4 +1,8 @@
+#!/usr/bin/env julia
+using ArgParse
+using BioAlignments
 using BioSequences
+using DataStructures
 using CSV
 using FASTX
 using XAM
@@ -21,19 +25,28 @@ function main()
     records = load_records(args["bamfile"], info_dict, args["name"])
 
     open(args["output"], "w") do f
-        write(f, "cell,umi,nrecords,ref_coverage,consensus\n")
+        write(f, "cell,umi,nrecords,ref_coverage,consensus,filled_consensus,depths\n")
 
-        for (cell, cell_records) in reads_dict
+        for (cell, cell_records) in records
             for umi in keys(cell_records)
                 nrecords = length(cell_records[umi])
-                consensus, depths = make_consensus!(cell_records[umi], reference)
+                consensus, depths =
+                    make_consensus!(cell_records[umi], reference, fill_with_ref = false)
                 coverage = length(filter(x -> x > 0, depths)) / length(depths)
+
+                # fill Ns in consensus with reference
+                filled_consensus = copy(consensus)
+                for i in eachindex(filled_consensus)
+                    if filled_consensus[i] == DNA_N
+                        filled_consensus[i] = reference[i]
+                    end
+                end
 
                 # write result
                 write(
                     f,
                     "$(string(cell)),$(string(umi)),$(nrecords),$(coverage)," *
-                    "$(string(LongDNASeq(consensus))),$(join(depths, ';'))\n",
+                    "$(string(LongDNASeq(consensus))),$(string(LongDNASeq(filled_consensus))),$(join(depths, ';'))\n",
                 )
             end
         end
@@ -56,8 +69,9 @@ Returns the consensus and a vector with the depth for each reference position.
 """
 function make_consensus!(
     records::Vector{BAM.Record},
-    reference::LongSequence,
-)::Tuple{LongSequence,Vector{Int64}}
+    reference::LongSequence;
+    fill_with_ref::Bool = true,
+)::Tuple{Vector{DNA},Vector{Int64}}
     sort!(records, by = x -> BAM.position(x))
 
     pos_counts_start = DefaultOrderedDict{Int,Int}(0)
@@ -97,7 +111,7 @@ function make_consensus!(
                 )
 
                 idx += 1
-                dna_counter[pos] += 1
+                depth[pos] += 1
             else
                 delete!(current_reads, idx)
             end
@@ -108,9 +122,12 @@ function make_consensus!(
         pos += 1
     end
 
-    for i = 1:length(consensus)
-        if consensus[i] == DNA_N
-            consensus[i] = reference[i]
+    if fill_with_ref
+        # fill Ns in consensus with reference nucleotide
+        for i = 1:length(consensus)
+            if consensus[i] == DNA_N
+                consensus[i] = reference[i]
+            end
         end
     end
 
@@ -161,6 +178,8 @@ function load_records(
             end
         end
     end
+
+    return reads_dict
 end
 
 
@@ -187,6 +206,5 @@ function parse_arguments()
 
     return parse_args(s)
 end
-
 
 main()

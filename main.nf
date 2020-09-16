@@ -216,15 +216,37 @@ process sortAndConvert {
   cpus 4
 
   input:
-  tuple val(subject), file(sam)
+  tuple val(subject), path(sam)
   
   output:
-  tuple path("${subject}.bam"), path("${subject}.bam.bai")
+  tuple val(subject), path("${subject}.bam"), path("${subject}.bam.bai")
   
   script:
   """
   samtools sort -@ ${task.cpus} $sam -o ${subject}.bam
   samtools index ${subject}.bam
+  """
+}
+
+
+/*
+ * Make consensus from BAM
+ */
+process makeConsensus {
+  tag "$subject"
+  publishDir "output/consensus/${subject}", mode: 'copy'
+  cpus 4
+
+  input:
+  tuple val(subject), path(bam), path(bam_index), path(reference), path(barcodes)
+
+  output:
+  path('*.csv')
+
+  script:
+  """
+  bcr_consensus.jl -o ${subject}_HC.csv $bam $barcodes $reference ${subject}_HC
+  bcr_consensus.jl -o ${subject}_LC.csv $bam $barcodes $reference ${subject}_LC
   """
 }
 
@@ -259,4 +281,10 @@ workflow {
     .set { reads_with_ref }
 
   sortAndConvert(mapping(reads_with_ref))
+  
+  sortAndConvert.out.join(references)
+    .join(mergeLanes.out.info)
+    .set { consensus_pre_info }
+
+  makeConsensus(consensus_pre_info)
 }
