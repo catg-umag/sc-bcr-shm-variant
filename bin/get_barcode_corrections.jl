@@ -1,8 +1,5 @@
 #!/usr/bin/env julia
-using ArgParse
-using CSV
-using JSON
-using FASTX
+using ArgParse, CSV, FASTX, JSON
 
 include("../lib/julia/barcode_correction.jl")
 
@@ -45,6 +42,7 @@ function parse_arguments()
     )
 
     @add_arg_table! s begin
+        #! format: off
         "--corrections-outfile", "-o"
             help = "filename for corrections output (should include .json)"
             default = "barcode_corrections.json"
@@ -55,6 +53,7 @@ function parse_arguments()
         "whitelist"
             help = "cell barcode whitelist"
             required = true
+        #! format: on
     end
 
     return parse_args(s)

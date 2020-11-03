@@ -1,7 +1,5 @@
 #!/usr/bin/env julia
-using ArgParse
-using CSV
-using JSON
+using ArgParse, CSV, JSON
 
 include("../lib/julia/barcode_correction.jl")
 include("../lib/julia/paired_fastq_writer.jl")
@@ -62,6 +60,7 @@ function parse_arguments()
     s = ArgParseSettings(description = "Splits FASTQ files by subject")
 
     @add_arg_table! s begin
+        #! format: off
         "--output-dir", "-o"
             help = "output directory"
             default = "."
@@ -84,6 +83,7 @@ function parse_arguments()
             help = "experiment name"
             required = true
             dest_name = "experiment"
+        #! format: on
     end
 
     return parse_args(s)

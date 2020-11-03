@@ -9,6 +9,7 @@ include { build_cutadapt_args } from './lib/nextflow/utils'
  */
 cell_index = file(params.cell_index)
 cell_whitelist = file(params.cell_whitelist)
+region_positions = file(params.region_positions)
 
 channel
   .fromPath(params.references)
@@ -24,6 +25,63 @@ channel
   .map { ["${it.name}_L${it.lane}", file("$HOME" + it.fastq.replace('$HOME', ''))]}
   .set { reads }
 
+channel
+  .fromPath(params.external_consensus_path)
+  .map { [it.baseName, it] }
+  .set { external_consensus_with_name }
+
+
+/*
+ * Workflow
+ */
+workflow {
+  getBarcodeCorrections(reads, cell_whitelist)
+
+  extractBarcodes(reads.join(getBarcodeCorrections.out))
+  
+  // trimAdaptersCutAdapt(extractBarcodes.out.reads)
+  // splitFastqBySample(trimAdapters.out.reads.join(extractBarcodes.out.barcodes), cell_index)
+
+  // no barcode trimming (temporary)
+  extractBarcodes.out.reads
+    .map { [it[0], [it[1], it[2]]] }
+    .join(extractBarcodes.out.barcodes)
+    .set { reads_with_barcodes }
+
+  splitFastqBySample(reads_with_barcodes, cell_index)
+
+  splitFastqBySample.out
+    .transpose()
+    .map { [it[0].simpleName.replaceAll(/_L\d+$/, '')] + it }
+    .groupTuple()
+    .set { grouped_lanes }
+
+  mergeLanes(grouped_lanes)
+
+  mergeLanes.out.reads
+    .filter { it[0] =~ /K?B_S\d+/ }
+    .join(references)
+    .set { reads_with_ref }
+
+  sortAndConvert(mapping(reads_with_ref))
+  
+  sortAndConvert.out.join(references)
+    .join(mergeLanes.out.info)
+    .set { consensus_pre_info }
+
+  makeConsensus(consensus_pre_info)
+
+  filterConsensus(makeConsensus.out, region_positions)
+
+  filterConsensus.out
+    .map { [it.baseName.replaceAll(/_.*/, ""), it] }
+    .combine(external_consensus_with_name, by: 0)
+    .map { it[1..2] }
+    .set { cons_with_ext }
+
+  searchSequences(cons_with_ext)
+}
+
 
 /*
  * Corrects barcodes and saves them in a JSON file.
@@ -31,6 +89,8 @@ channel
 process getBarcodeCorrections {
   tag "$name"
   publishDir "output/bc_corrections/", pattern: '*.json', mode: 'copy'
+  label 'julia'
+  cpus 1
 
   input:  
   tuple val(name), path(reads)
@@ -42,6 +102,7 @@ process getBarcodeCorrections {
   script:
   (r1, r2) = reads.sort { it.simpleName }
   """
+  export JULIA_NUM_THREADS=${task.cpus}
   get_barcode_corrections.jl $r1 $cell_whitelist -o corrections_${name}.json
   """
 }
@@ -52,6 +113,8 @@ process getBarcodeCorrections {
  */
 process extractBarcodes {
   tag "$name"
+  label 'julia'
+  cpus 1
 
   input:
   tuple val(name), path(reads), path(corrections)
@@ -63,6 +126,7 @@ process extractBarcodes {
   script:
   (r1, r2) = reads.sort { it.simpleName }
   """
+  export JULIA_NUM_THREADS=${task.cpus}
   extract_barcodes.jl -r ${name}.r1.fastq.gz -b ${name}_barcodes.csv -c $corrections $r1
   """
 }
@@ -104,7 +168,7 @@ process trimAdaptersCutAdapt {
 /*
  * Trims adapters (automatic) and clean remaining FASTQ files
  */
-process trimAdapters {
+process trimAdaptersFastp {
   tag "$name"
   publishDir 'output/fastp/', pattern: "${name}_report*", mode: 'copy'
   cpus 4
@@ -133,6 +197,7 @@ process trimAdapters {
  */
 process splitFastqBySample {
   tag "$name"
+  label 'julia'
   cpus 4
 
   input:
@@ -146,6 +211,7 @@ process splitFastqBySample {
   (r1, r2) = reads.sort { it.simpleName }
   exp = name.replaceAll(/_L\d+$/, '')
   """
+  export JULIA_NUM_THREADS=${task.cpus}
   split_fastq_by_sample.jl --r1 $r1 --r2 $r2 -b $barcodes -i $cell_index -n $exp
   pigz -p ${task.cpus} *.fastq
   """
@@ -234,6 +300,7 @@ process sortAndConvert {
  */
 process makeConsensus {
   tag "$subject"
+  label 'julia'
   publishDir "output/consensus/${subject}", mode: 'copy'
   cpus 4
 
@@ -245,46 +312,62 @@ process makeConsensus {
 
   script:
   """
+  export JULIA_NUM_THREADS=${task.cpus}
   bcr_consensus.jl -o ${subject}_HC.csv $bam $barcodes $reference ${subject}_HC
   bcr_consensus.jl -o ${subject}_LC.csv $bam $barcodes $reference ${subject}_LC
   """
 }
 
 
-workflow {
-  getBarcodeCorrections(reads, cell_whitelist)
+/*
+ * Filter created consensus by a set of given rules
+ */
+process filterConsensus {
+  tag "$subject_chain"
+  label 'julia'
+  publishDir "output/filtered_consensus/${subject_chain}", mode: 'copy'
+  cpus 1
 
-  extractBarcodes(reads.join(getBarcodeCorrections.out))
+  input:
+  path consensus_file
+  path region_positions
   
-  // trimAdapters(extractBarcodes.out.reads)
-  // splitFastqBySample(trimAdapters.out.reads.join(extractBarcodes.out.barcodes), cell_index)
-
-  // no barcode trimming (temporary)
-  extractBarcodes.out.reads
-    .map { [it[0], [it[1], it[2]]] }
-    .join(extractBarcodes.out.barcodes)
-    .set { reads_with_barcodes }
-
-  splitFastqBySample(reads_with_barcodes, cell_index)
-
-  splitFastqBySample.out
-    .transpose()
-    .map { [it[0].simpleName.replaceAll(/_L\d+$/, '')] + it }
-    .groupTuple()
-    .set { grouped_lanes }
-
-  mergeLanes(grouped_lanes)
-
-  mergeLanes.out.reads
-    .filter { it[0] =~ /K?B_S\d+/ }
-    .join(references)
-    .set { reads_with_ref }
-
-  sortAndConvert(mapping(reads_with_ref))
+  output:
+  path "${subject_chain}.fasta"
   
-  sortAndConvert.out.join(references)
-    .join(mergeLanes.out.info)
-    .set { consensus_pre_info }
+  script:
+  subject_chain = consensus_file.baseName
+  """
+  export JULIA_NUM_THREADS=${task.cpus}
+  filter_consensus.jl \
+  --min-vdj-coverage ${params.consensus_rules.vdj_coverage} \
+  --min-cdr-coverage ${params.consensus_rules.cdr_coverage} \
+  --min-reads ${params.consensus_rules.reads} \
+  --reference-name ${consensus_file.baseName}
+  -o ${subject_chain}.fasta $consensus_file $region_positions
+  """
+}
 
-  makeConsensus(consensus_pre_info)
+
+/*
+ * Compare sequences against external ones
+ */
+process searchSequences {
+  tag "$subject_chain"
+  label 'julia'
+  publishDir "output/alignment/${subject_chain}", mode: 'copy'
+  cpus 16
+
+  input:
+  tuple path(own_consensus), path(external_consensus)
+  
+  output:
+  path "${subject_chain}.csv"
+  
+  script:
+  subject_chain = own_consensus.baseName
+  """
+  export JULIA_NUM_THREADS=${task.cpus}
+  search_cells.jl -o ${subject_chain}.csv $own_consensus $external_consensus 
+  """
 }

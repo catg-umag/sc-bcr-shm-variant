@@ -1,11 +1,5 @@
 #!/usr/bin/env julia
-using ArgParse
-using BioAlignments
-using BioSequences
-using DataStructures
-using CSV
-using FASTX
-using XAM
+using ArgParse, BioAlignments, BioSequences, DataStructures, CSV, FASTX, XAM
 
 
 include("../lib/julia/dna_counter.jl")
@@ -187,6 +181,7 @@ function parse_arguments()
     s = ArgParseSettings(description = "Make consensus by Cell/UMI")
 
     @add_arg_table! s begin
+        #! format: off
         "--output", "-o"
             help = "output file (.csv)"
             default = "consensus.csv"
@@ -202,6 +197,7 @@ function parse_arguments()
         "name"
             help = "Reference to use"
             required = true
+        #! format: on
     end
 
     return parse_args(s)

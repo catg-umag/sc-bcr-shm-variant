@@ -1,9 +1,5 @@
 #!/usr/bin/env julia
-using ArgParse
-using CodecZlib
-using CSV
-using FASTX
-using JSON
+using ArgParse, CodecZlib, CSV, FASTX, JSON
 
 include("../lib/julia/barcode_correction.jl")
 
@@ -59,6 +55,7 @@ function parse_arguments()
     )
 
     @add_arg_table! s begin
+        #! format: off
         "--output-reads", "-r"
             help = "output FASTQ file (reads without barcodes)"
             default = "reads_cleaned.fastq.gz"
@@ -73,6 +70,7 @@ function parse_arguments()
         "input_fastq"
             help = "Input FASTQ file to extract barcodes (muste be R1)"
             required = true
+        #! format: on
     end
 
     return parse_args(s)
