@@ -91,6 +91,7 @@ process getBarcodeCorrections {
   publishDir "output/bc_corrections/", pattern: '*.json', mode: 'copy'
   label 'julia'
   cpus 1
+  memory '16GB'
 
   input:  
   tuple val(name), path(reads)
@@ -115,6 +116,7 @@ process extractBarcodes {
   tag "$name"
   label 'julia'
   cpus 1
+  memory '16GB'
 
   input:
   tuple val(name), path(reads), path(corrections)
@@ -199,6 +201,7 @@ process splitFastqBySample {
   tag "$name"
   label 'julia'
   cpus 4
+  memory '16GB'
 
   input:
   tuple val(name), path(reads), path(barcodes)
@@ -258,7 +261,7 @@ process mergeLanes {
  */
 process mapping {
   tag "$subject"
-  cpus 4
+  cpus 8
 
   input:
   tuple val(subject), path(reads), path(reference)
