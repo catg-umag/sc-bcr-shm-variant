@@ -98,12 +98,12 @@ function parse_arguments()
             dest_name = "output_reads"
         "--min-vdj-coverage", "-v"
             help = "minimum VDJ Region coverage"
-            arg_type = Number
+            arg_type = Float64
             default = 0.9
             dest_name = "min_vdj_cov"
         "--min-cdr-coverage", "-c"
             help = "minimum CDR Regions coverage"
-            arg_type = Number
+            arg_type = Float64
             default = 0.95
             dest_name = "min_cdr_cov"
         "--min-reads", "-r"

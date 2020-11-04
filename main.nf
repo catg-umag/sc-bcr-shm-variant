@@ -71,7 +71,7 @@ workflow {
 
   makeConsensus(consensus_pre_info)
 
-  filterConsensus(makeConsensus.out, region_positions)
+  filterConsensus(makeConsensus.out.flatten(), region_positions)
 
   filterConsensus.out
     .map { [it.baseName.replaceAll(/_.*/, ""), it] }
@@ -306,6 +306,7 @@ process makeConsensus {
   label 'julia'
   publishDir "output/consensus/${subject}", mode: 'copy'
   cpus 4
+  memory '32G'
 
   input:
   tuple val(subject), path(bam), path(bam_index), path(reference), path(barcodes)
@@ -346,7 +347,7 @@ process filterConsensus {
   --min-vdj-coverage ${params.consensus_rules.vdj_coverage} \
   --min-cdr-coverage ${params.consensus_rules.cdr_coverage} \
   --min-reads ${params.consensus_rules.reads} \
-  --reference-name ${consensus_file.baseName}
+  --reference-name ${consensus_file.baseName} \
   -o ${subject_chain}.fasta $consensus_file $region_positions
   """
 }
@@ -360,6 +361,8 @@ process searchSequences {
   label 'julia'
   publishDir "output/alignment/${subject_chain}", mode: 'copy'
   cpus 16
+  memory { 32.GB * task.attempt }
+  errorStrategy { task.exitStatus == 137 ? 'retry' : 'terminate'}
 
   input:
   tuple path(own_consensus), path(external_consensus)
