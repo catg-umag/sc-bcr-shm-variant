@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 using Base.Threads
-using ArgParse, CSV, DataFrames, Edlib, FASTX
+using ArgParse, Edlib, FASTX
 
 
 function main()
@@ -9,62 +9,74 @@ function main()
     external_sequences = load_sequences_str(args["external_sequences"])
     own_sequences = load_sequences_str(args["own_sequences"])
 
-    found = find_cross_sequences(external_sequences, own_sequences, args["max_dist"])
-
     open(args["output_summary"], "w") do f
-        CSV.write(f, DataFrame(found))
+        write(f, "cellranger,ours,dist,same_cell\n")
+        Threads.@threads for i in eachindex(external_sequences)
+            best_candidate = find_best_cantidadate(
+                external_sequences[i],
+                own_sequences,
+                args["max_dist"],
+            )
+
+            if !isnothing(best_candidate)
+                write(f, join(best_candidate, ",") * "\n")
+            else
+                # write empty line
+                write(f, external_sequences[i].id * ",,,\n")
+            end
+        end
     end
 end
 
 
-function find_cross_sequences(external_seqs, own_seqs, max_dist::Int)
-    distances::Matrix{Union{Int8,Missing}} =
-        fill(Int8(127), length(external_seqs), length(own_seqs))
-    Threads.@threads for i in eachindex(external_seqs)
-        @simd for j in eachindex(own_seqs)
-            @inbounds distances[i, j] = Edlib.edit_distance(
-                external_seqs[i].sequence,
-                own_seqs[j].sequence,
-                mode = :infix,
-                max_distance = 127,
+function find_best_cantidadate(external_seq, own_seqs, max_dist)
+    distances = get_distances(external_seq, own_seqs)
+
+    if any(x -> !ismissing(x), distances)
+        dists_no_missing = skipmissing(distances)
+        min_dist = minimum(dists_no_missing)
+    else
+        min_dist = nothing
+    end
+
+    if !isnothing(min_dist) && min_dist <= max_dist
+        candidates = findall(==(min_dist), dists_no_missing)
+
+        best_candidate = nothing
+        # iterate through all the candidates to check if any of them has the same cell
+        for c in candidates
+            same_cell = check_same_cell(external_seq.id, own_seqs[c].id)
+            best_candidate = (
+                cellranger = external_seq.id,
+                ours = own_seqs[c].id,
+                dist = distances[c],
+                same_cell = same_cell,
             )
-        end
-    end
-
-    similar = []
-    for i in eachindex(external_seqs)
-        cr_dists = @view distances[i, :]
-
-        if any(x -> !ismissing(x), cr_dists)
-            cr_dists_no_missing = skipmissing(cr_dists)
-            min_dist = minimum(cr_dists_no_missing)
-        else
-            min_dist = nothing
-        end
-
-        if !isnothing(min_dist) && min_dist <= max_dist
-            candidates = findall(==(min_dist), cr_dists_no_missing)
-
-            best_candidate = nothing
-            # iterate through all the candidates to check if any of them has the same cell
-            for c in candidates
-                same_cell = check_same_cell(external_seqs[i].id, own_seqs[c].id)
-                best_candidate = (
-                    cellranger = external_seqs[i].id,
-                    ours = own_seqs[c].id,
-                    dist = distances[i, c],
-                    same_cell = same_cell,
-                )
-                # if it has the same cell id, then make it automatically the best candidate
-                if same_cell
-                    break
-                end
+            # if it has the same cell id, then make it automatically the best candidate
+            if same_cell
+                break
             end
-            push!(similar, best_candidate)
         end
+
+        return best_candidate
+    end
+    
+    return nothing
+end
+
+
+function get_distances(external_seq, own_seqs)::Vector{Union{Int8,Missing}}
+    distances::Vector{Union{Int8,Missing}} = fill(Int8(127), length(own_seqs))
+    @simd for i in eachindex(own_seqs)
+        @inbounds distances[i] = Edlib.edit_distance(
+            external_seq.sequence,
+            own_seqs[i].sequence,
+            mode = :infix,
+            max_distance = 127,
+        )
     end
 
-    return similar
+    return distances
 end
 
 

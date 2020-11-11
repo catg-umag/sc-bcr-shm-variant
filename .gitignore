@@ -6,7 +6,6 @@
 .nextflow.log*
 input
 output*/
-testing*/
 *.html
 *.txt
 params.yml

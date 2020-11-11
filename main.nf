@@ -91,7 +91,7 @@ process getBarcodeCorrections {
   publishDir "output/bc_corrections/", pattern: '*.json', mode: 'copy'
   label 'julia'
   cpus 1
-  memory '16GB'
+  memory 16.GB
 
   input:  
   tuple val(name), path(reads)
@@ -115,8 +115,8 @@ process getBarcodeCorrections {
 process extractBarcodes {
   tag "$name"
   label 'julia'
-  cpus 1
-  memory '16GB'
+  cpus 2
+  memory 16.GB
 
   input:
   tuple val(name), path(reads), path(corrections)
@@ -201,7 +201,7 @@ process splitFastqBySample {
   tag "$name"
   label 'julia'
   cpus 4
-  memory '16GB'
+  memory 16.GB
 
   input:
   tuple val(name), path(reads), path(barcodes)
@@ -305,8 +305,10 @@ process makeConsensus {
   tag "$subject"
   label 'julia'
   publishDir "output/consensus/${subject}", mode: 'copy'
-  cpus 4
-  memory '32G'
+  cpus 8
+  memory { 16.GB + (16.GB * task.attempt) }
+  errorStrategy { task.exitStatus == 137 ? 'retry' : 'terminate' }
+  maxRetries 3
 
   input:
   tuple val(subject), path(bam), path(bam_index), path(reference), path(barcodes)
@@ -361,8 +363,8 @@ process searchSequences {
   label 'julia'
   publishDir "output/alignment/${subject_chain}", mode: 'copy'
   cpus 16
-  memory { 32.GB * task.attempt }
-  errorStrategy { task.exitStatus == 137 ? 'retry' : 'terminate'}
+  memory { 16.GB * task.attempt }
+  errorStrategy { task.exitStatus == 137 ? 'retry' : 'terminate' }
 
   input:
   tuple path(own_consensus), path(external_consensus)
@@ -374,6 +376,7 @@ process searchSequences {
   subject_chain = own_consensus.baseName
   """
   export JULIA_NUM_THREADS=${task.cpus}
-  search_cells.jl -o ${subject_chain}.csv $own_consensus $external_consensus 
+  search_cells.jl -o ${subject_chain}.csv -d ${params.consensus_max_dist} \
+  $own_consensus $external_consensus 
   """
 }

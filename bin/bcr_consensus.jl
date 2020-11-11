@@ -1,4 +1,5 @@
 #!/usr/bin/env julia
+using Base.Threads
 using ArgParse, BioAlignments, BioSequences, DataStructures, CSV, FASTX, XAM
 
 
@@ -8,6 +9,7 @@ include("../lib/julia/others.jl")
 
 function main()
     args = parse_arguments()
+    print(args)
 
     # load data
     reference = get_reference(args["reference"], args["name"])
@@ -21,7 +23,8 @@ function main()
     open(args["output"], "w") do f
         write(f, "cell,umi,nrecords,ref_coverage,consensus,filled_consensus,depths\n")
 
-        for (cell, cell_records) in records
+        Threads.@threads for cell in collect(eachindex(records))
+            cell_records = records[cell]
             for umi in keys(cell_records)
                 nrecords = length(cell_records[umi])
                 consensus, depths =
