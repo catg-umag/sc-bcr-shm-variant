@@ -20,7 +20,7 @@ pkgs = [
 ]
 no_test = [x.name for x in pkgs]
 
-julia_version = v"1.5.2"
+julia_version = v"1.5.3"
 parent_image = "ubuntu:focal"
 apt_override = String[
     # absolutely necessary
@@ -34,6 +34,7 @@ apt_override = String[
     # additional
     "pigz",
 ]
+
 
 # create Dockerfile
 SimpleContainerGenerator.create_dockerfile(
