@@ -306,8 +306,8 @@ process makeConsensus {
   label 'julia'
   publishDir "output/consensus/${subject}", mode: 'copy'
   cpus 8
-  memory { 16.GB + (16.GB * task.attempt) }
-  errorStrategy { task.exitStatus == 137 ? 'retry' : 'terminate' }
+  memory { 32.GB * task.attempt }
+  errorStrategy { task.exitStatus in 137..140 ? 'retry' : 'terminate' }
   maxRetries 3
 
   input:
