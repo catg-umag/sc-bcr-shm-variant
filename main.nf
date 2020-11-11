@@ -331,7 +331,7 @@ process makeConsensus {
 process filterConsensus {
   tag "$subject_chain"
   label 'julia'
-  publishDir "output/filtered_consensus/${subject_chain}", mode: 'copy'
+  publishDir "output/filtered_consensus/${subject}", mode: 'copy'
   cpus 1
 
   input:
@@ -343,6 +343,7 @@ process filterConsensus {
   
   script:
   subject_chain = consensus_file.baseName
+  subject = subject_chain - ~/_[HL]C/
   """
   export JULIA_NUM_THREADS=${task.cpus}
   filter_consensus.jl \
@@ -361,7 +362,7 @@ process filterConsensus {
 process searchSequences {
   tag "$subject_chain"
   label 'julia'
-  publishDir "output/alignment/${subject_chain}", mode: 'copy'
+  publishDir "output/alignment/${subject}", mode: 'copy'
   cpus 16
   memory { 16.GB * task.attempt }
   errorStrategy { task.exitStatus == 137 ? 'retry' : 'terminate' }
@@ -374,6 +375,7 @@ process searchSequences {
   
   script:
   subject_chain = own_consensus.baseName
+  subject = subject_chain - ~/_[HL]C/
   """
   export JULIA_NUM_THREADS=${task.cpus}
   search_cells.jl -o ${subject_chain}.csv -d ${params.consensus_max_dist} \
