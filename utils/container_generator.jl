@@ -9,13 +9,11 @@ pkgs = [
     (name = "BioAlignments", version = "2.0.0")
     (name = "BioSequences", version = "2.0.5")
     (name = "CodecZlib", version = "0.7.0")
-    (name = "CSV", version = "0.7.7")
-    (name = "DataFrames", version = "0.21.8")
+    (name = "CSV", version = "0.8.0")
     (name = "DataStructures", version = "0.17.20")
     (name = "Edlib", version = "0.1.1")
-    (name = "JSON", version = "0.21.1")
     (name = "FASTX", version = "1.1.3")
-    (name = "Query", version = "1.0.0")
+    (name = "JSON", version = "0.21.1")
     (name = "XAM", version = "0.2.6")
 ]
 no_test = [x.name for x in pkgs]
