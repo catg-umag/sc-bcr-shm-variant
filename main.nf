@@ -71,9 +71,10 @@ workflow {
 
   makeConsensus(consensus_pre_info)
 
-  filterConsensus(makeConsensus.out.flatten(), region_positions)
+  filterConsensus(makeConsensus.out.flatten(), region_positions) \
+  | sortConsensus
 
-  filterConsensus.out
+  sortConsensus.out
     .map { [it.baseName.replaceAll(/_.*/, ""), it] }
     .combine(external_consensus_with_name, by: 0)
     .map { it[1..2] }
@@ -305,9 +306,9 @@ process makeConsensus {
   tag "$subject"
   label 'julia'
   publishDir "output/consensus/${subject}", mode: 'copy'
-  cpus 8
+  cpus 4
   memory { 32.GB * task.attempt }
-  errorStrategy { task.exitStatus in 137..140 ? 'retry' : 'terminate' }
+  errorStrategy { task.exitStatus in 137..140 ? 'retry' : 'finish' }
   maxRetries 3
 
   input:
@@ -331,7 +332,6 @@ process makeConsensus {
 process filterConsensus {
   tag "$subject_chain"
   label 'julia'
-  publishDir "output/filtered_consensus/${subject}", mode: 'copy'
   cpus 1
 
   input:
@@ -343,7 +343,6 @@ process filterConsensus {
   
   script:
   subject_chain = consensus_file.baseName
-  subject = subject_chain - ~/_[HL]C/
   """
   export JULIA_NUM_THREADS=${task.cpus}
   filter_consensus.jl \
@@ -357,6 +356,29 @@ process filterConsensus {
 
 
 /*
+ * Sort filtered consensus by id
+ */
+process sortConsensus {
+  tag "${consensus_file.baseName}"
+  publishDir "output/filtered_consensus/${subject}", \
+    mode: 'copy', saveAs: { "${subject_chain}.fasta" }
+
+  input:
+  path consensus_file
+
+  output:
+  path "${subject_chain}_sorted.fasta"
+  
+  script:
+  subject_chain = consensus_file.baseName
+  subject = subject_chain - ~/_[HL]C/
+  """
+  seqkit sort $consensus_file -w0 > ${subject_chain}_sorted.fasta
+  """
+}
+
+
+/*
  * Compare sequences against external ones
  */
 process searchSequences {
@@ -365,7 +387,7 @@ process searchSequences {
   publishDir "output/alignment/${subject}", mode: 'copy'
   cpus 16
   memory { 16.GB * task.attempt }
-  errorStrategy { task.exitStatus == 137 ? 'retry' : 'terminate' }
+  errorStrategy { task.exitStatus == 137 ? 'retry' : 'finish' }
 
   input:
   tuple path(own_consensus), path(external_consensus)
@@ -374,7 +396,7 @@ process searchSequences {
   path "${subject_chain}.csv"
   
   script:
-  subject_chain = own_consensus.baseName
+  subject_chain = own_consensus.baseName - ~/_sorted/
   subject = subject_chain - ~/_[HL]C/
   """
   export JULIA_NUM_THREADS=${task.cpus}
