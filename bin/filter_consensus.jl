@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-using ArgParse, CSV, DataFrames, Query
+using ArgParse, CSV
 
 
 function main()
@@ -8,40 +8,54 @@ function main()
     region_positions = load_regions_positions(args["region_positions"])
     positions = region_positions[args["reference_name"]]
 
-    df_consensus = load_consensus(args["input_consensus"], positions)
-
-    # filter consensus
-    df_pass =
-        df_consensus |>
-        @filter(
-            (_.vdj_cov >= args["min_vdj_cov"]) &&
-            (_.cdr_cov >= args["min_cdr_cov"]) &&
-            (_.nrecords >= args["min_reads"])
-        ) |>
-        DataFrame
+    passed_consensus = get_filtered_consensus(
+        args["input_consensus"],
+        positions,
+        args["min_vdj_cov"],
+        args["min_cdr_cov"],
+        args["min_reads"],
+    )
 
     # write fasta
     open(args["output_reads"], "w") do f
-        for row in eachrow(df_pass)
+        for row in passed_consensus
             write(f, ">$(row.cell)_$(row.umi)\n$(row.filled_consensus)\n")
         end
     end
 end
 
 
-function load_consensus(consensus_file, positions)
+"""
+    get_filtered_consensus(consensus_file, positions, min_vdj_cov, min_cdr_cov, min_reads)
+
+Reads consensus from file and checks them against filters,
+returning only the ones that passed all filters
+"""
+function get_filtered_consensus(
+    consensus_file::String,
+    positions::Dict{String,Int64},
+    min_vdj_cov::AbstractFloat,
+    min_cdr_cov::AbstractFloat,
+    min_reads::Integer,
+)::Vector{NamedTuple}
     data = []
     for x in CSV.File(consensus_file)
-        row_dict = Dict(y => x[y] for y in eachindex(x))
-        row_dict[:depths] = [parse(Int, x) for x in split(row_dict[:depths], ";")]
+        # if not enough reads, skip
+        (x.nrecords < min_reads) && continue
+
+        # transform depths to numeric
+        depths = [parse(Int, x) for x in split(x.depths, ";")]
 
         # get coverages
-        row_dict[:vdj_cov] =
+        vdj_cov =
             get_coverage(
-                row_dict[:depths],
+                depths,
                 positions["VDJ-REGION_start"],
                 positions["VDJ-REGION_end"],
             ) / (positions["VDJ-REGION_end"] - positions["VDJ-REGION_start"] + 1)
+
+        # no enough VDJ coverage? skip
+        (vdj_cov < min_vdj_cov) && continue
 
         cdr_names = unique(map(
             x -> x.match,
@@ -50,10 +64,10 @@ function load_consensus(consensus_file, positions)
                 map(x -> match(r"^CDR.", x), collect(keys(positions))),
             ),
         ))
-        row_dict[:cdr_cov] =
+        cdr_cov =
             sum(
                 get_coverage(
-                    row_dict[:depths],
+                    depths,
                     positions["$(cdr)-IMGT_start"],
                     positions["$(cdr)-IMGT_end"],
                 ) for cdr in cdr_names
@@ -62,14 +76,16 @@ function load_consensus(consensus_file, positions)
                 for cdr in cdr_names
             )
 
-        push!(data, row_dict)
+        if cdr_cov >= min_cdr_cov
+            push!(data, (cell = x.cell, umi = x.umi, filled_consensus = x.filled_consensus))
+        end
     end
 
-    df = DataFrame([Dict(y => x[y] for y in keys(x) if y != :depths) for x in data])
+    return data
 end
 
 
-function load_regions_positions(region_positions_file)
+function load_regions_positions(region_positions_file)::Dict{String,Dict{String,Int64}}
     region_positions = Dict(
         x.Sequence_ID =>
             Dict(String(y) => x[y] for y in eachindex(x) if y != :Sequence_ID)
