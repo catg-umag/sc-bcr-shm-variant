@@ -163,7 +163,6 @@ process trimAdaptersCutAdapt {
     --overlap 5 \
     -m 20 \
     -j ${task.cpus / 2} \
-    -f fastq \
     -o ${name}_clean.R1.fastq.gz \
     -p ${name}_clean.R2.fastq.gz \
     ${cutadapt_primers} \
