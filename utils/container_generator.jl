@@ -19,7 +19,7 @@ pkgs = [
 no_test = [x.name for x in pkgs]
 
 julia_version = v"1.5.3"
-parent_image = "debian:buster-slim"
+parent_image = "debian:10"
 apt_override = String[
     # absolutely necessary
     "build-essential",
@@ -28,6 +28,7 @@ apt_override = String[
     "gpg",
     "gpg-agent",
     "locales",
+    "procps",
     "wget",
     # additional
     "pigz",
@@ -53,6 +54,6 @@ basename = split(local_image_tag, "/")[2]
 run(`podman build -t $(local_image_tag) .`)
 run(`podman save --format oci-archive --output $(basename).tar $(local_image_tag)`)
 run(`singularity build $(basename).sif oci-archive://$(basename).tar`)
-run(`singularity sign --keyidx 0 $(basename).sif`)
-run(`singularity push $(basename).sif library://$(library_image_url)`)
 run(`rm -fr $(basename).tar Dockerfile simplecontainergenerator_container_files`)
+run(`singularity sign $(basename).sif`)
+run(`singularity push $(basename).sif library://$(library_image_url)`)
