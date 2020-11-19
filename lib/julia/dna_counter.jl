@@ -18,11 +18,11 @@ end
 
 
 """
-    add_to_dna_counter!(counter, base, value)
+    add!(counter, base, value)
 
 Adds a value to the counter of one nucleotide
 """
-@inline function add_to_dna_counter!(counter::DNACounter, base::DNA, value::Number)
+@inline function add!(counter::DNACounter, base::DNA, value::Number)
     for i = 1:length(counter.dna_bases)
         if counter.dna_bases[i] == base
             @inbounds counter.counters[i] += value
@@ -34,11 +34,11 @@ end
 
 
 """
-    reset_dna_counter!(counter, value)
+    reset!(counter, value)
 
 Sets nucleotide counters and sum to a given value
 """
-@inline function reset_dna_counter!(counter::DNACounter, value::Number = 0.0)
+@inline function reset!(counter::DNACounter, value::Number = 0.0)
     @simd for i = 1:length(counter.dna_bases)
         @inbounds counter.counters[i] = value
     end

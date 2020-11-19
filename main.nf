@@ -39,17 +39,22 @@ workflow {
 
   extractBarcodes(reads.join(getBarcodeCorrections.out))
   
-  // trimAdaptersCutAdapt(extractBarcodes.out.reads)
-  // splitFastqBySample(trimAdapters.out.reads.join(extractBarcodes.out.barcodes), cell_index)
+  if (params.trim_adapters) {
+    trimAdaptersCutAdapt(extractBarcodes.out.reads)
+    splitFastqBySample(
+      trimAdaptersCutAdapt.out.reads
+        .join(extractBarcodes.out.barcodes),
+        cell_index
+      )  
+  } else {
+    extractBarcodes.out.reads
+      .map { [it[0], [it[1], it[2]]] }
+      .join(extractBarcodes.out.barcodes)
+      .set { reads_with_barcodes }
 
-  // no barcode trimming (temporary)
-  extractBarcodes.out.reads
-    .map { [it[0], [it[1], it[2]]] }
-    .join(extractBarcodes.out.barcodes)
-    .set { reads_with_barcodes }
-
-  splitFastqBySample(reads_with_barcodes, cell_index)
-
+    splitFastqBySample(reads_with_barcodes, cell_index)
+  }
+  
   splitFastqBySample.out
     .transpose()
     .map { [it[0].simpleName.replaceAll(/_L\d+$/, '')] + it }
@@ -117,7 +122,6 @@ process extractBarcodes {
   tag "$name"
   label 'julia'
   cpus 2
-  memory 16.GB
 
   input:
   tuple val(name), path(reads), path(corrections)
@@ -154,7 +158,7 @@ process trimAdaptersCutAdapt {
   cutadapt_primers = build_cutadapt_args(params.primers)
   """
   cutadapt \
-    -e 0.12 \
+    -e 2 \
     --times 3 \
     --overlap 5 \
     -m 20 \
@@ -332,7 +336,7 @@ process makeConsensus {
 process filterConsensus {
   tag "$subject_chain"
   label 'julia'
-  cpus 1
+  cpus 2
 
   input:
   path consensus_file
@@ -386,8 +390,6 @@ process searchSequences {
   label 'julia'
   publishDir "output/alignment/${subject}", mode: 'copy'
   cpus 16
-  memory { 16.GB * task.attempt }
-  errorStrategy { task.exitStatus == 137 ? 'retry' : 'finish' }
 
   input:
   tuple path(own_consensus), path(external_consensus)

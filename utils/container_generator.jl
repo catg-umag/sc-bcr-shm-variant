@@ -19,7 +19,7 @@ pkgs = [
 no_test = [x.name for x in pkgs]
 
 julia_version = v"1.5.3"
-parent_image = "ubuntu:focal"
+parent_image = "debian:buster-slim"
 apt_override = String[
     # absolutely necessary
     "build-essential",

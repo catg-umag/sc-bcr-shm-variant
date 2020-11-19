@@ -28,7 +28,7 @@ function main()
             for umi in keys(cell_records)
                 nrecords = length(cell_records[umi])
                 consensus, depths =
-                    make_consensus!(cell_records[umi], reference, fill_with_ref = false)
+                    make_consensus!(cell_records[umi], reference, fill_with_reference = false)
                 coverage = length(filter(x -> x > 0, depths)) / length(depths)
 
                 # fill Ns in consensus with reference
@@ -50,13 +50,6 @@ function main()
     end
 end
 
-@inline function is_valid(record::BAM.Record)
-    return BAM.isfilled(record) &&
-           BAM.ismapped(record) &&
-           BAM.isnextmapped(record) &&
-           BAM.refid(record) == BAM.nextrefid(record)
-end
-
 
 """
     make_consensus!(records, reference)
@@ -65,9 +58,9 @@ Creates a consensus sequence by frequency, filling the gaps with the reference s
 Returns the consensus and a vector with the depth for each reference position.
 """
 function make_consensus!(
-    records::Vector{BAM.Record},
+    records::Vector{BAM.Record },
     reference::LongSequence;
-    fill_with_ref::Bool = true,
+    fill_with_reference::Bool = true,
 )::Tuple{Vector{DNA},Vector{Int64}}
     sort!(records, by = x -> BAM.position(x))
 
@@ -97,11 +90,11 @@ function make_consensus!(
             end
         end
 
-        reset_dna_counter!(dna_counter)
+        reset!(dna_counter)
         idx = 1
         for read in current_reads
             if pos < read.startpos + read.length
-                add_to_dna_counter!(
+                add!(
                     dna_counter,
                     read.sequence[pos-read.startpos+1],
                     (10^(read.quality[pos-read.startpos+1] / 10)),
@@ -119,7 +112,7 @@ function make_consensus!(
         pos += 1
     end
 
-    if fill_with_ref
+    if fill_with_reference
         # fill Ns in consensus with reference nucleotide
         for i = 1:length(consensus)
             if consensus[i] == DNA_N
@@ -177,6 +170,14 @@ function load_records(
     end
 
     return reads_dict
+end
+
+
+@inline function is_valid(record::BAM.Record)
+    return BAM.isfilled(record) &&
+           BAM.ismapped(record) &&
+           BAM.isnextmapped(record) &&
+           BAM.refid(record) == BAM.nextrefid(record)
 end
 
 

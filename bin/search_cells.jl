@@ -65,14 +65,17 @@ function find_best_cantidadate(external_seq, own_seqs, max_dist)
 end
 
 
+"""
+    get_distances(external_seq, own_seqs)
+
+Calculates and returns all the distances of `external_seq` against `own_seqs`
+"""
 function get_distances(external_seq, own_seqs)::Vector{Union{Int8,Missing}}
     distances::Vector{Union{Int8,Missing}} = fill(Int8(127), length(own_seqs))
     @simd for i in eachindex(own_seqs)
-        @inbounds distances[i] = Edlib.edit_distance(
+        @inbounds distances[i] = get_minimum_distance(
             external_seq.sequence,
-            own_seqs[i].sequence,
-            mode = :infix,
-            max_distance = 127,
+            own_seqs[i].sequence
         )
     end
 
@@ -80,10 +83,67 @@ function get_distances(external_seq, own_seqs)::Vector{Union{Int8,Missing}}
 end
 
 
+"""
+    get_minimum_distance(s1, s2)
+
+Gets edit distance between `s1` and `s2` without counting edges.
+To determine the start/end, a number of consecutive matches are required.
+"""
+function get_minimum_distance(s1::AbstractString, s2::AbstractString)
+    # distance higher than 40 should mean that they are really different,
+    # so continuing with the alignment is not worth it
+    aln = Edlib.alignment(s1, s2; max_distance=40)
+    if !ismissing(aln)
+        alignment = aln.alignment
+        range = (
+            low = find_consecutive_end_matches(alignment),
+            high = find_consecutive_end_matches(alignment; direction_fw = false),
+        )
+
+        return aln.distance - (range.low[2] + range.high[2])
+    end
+    return missing
+end
+
+
+"""
+    find_consecutive_end_matches(alignment, direction_fw, required_matches)
+
+Finds consecutive matches on some ends alignment.
+"""
+function find_consecutive_end_matches(
+    alignment::Vector{Edlib.Alignment};
+    direction_fw::Bool = true,
+    required_matches::Integer = 5,
+)::Tuple{Integer, Integer}
+    range = direction_fw ? (1:length(alignment)) : (length(alignment):-1:1)
+    consecutive_matches = 0
+    missmatches = 0
+    for i in range
+        if alignment[i] == Edlib.MATCH
+            consecutive_matches += 1
+            if consecutive_matches == required_matches
+                return (i - (required_matches - 1) * (direction_fw ? 1 : -1), missmatches)
+            end
+        else
+            missmatches += 1
+            if consecutive_matches > 0
+                consecutive_matches = 0
+            end
+        end
+    end
+end
+
+
+"""
+    load_sequences_str(filename)
+
+Loads all sequences from a FASTA file as strings
+"""
 function load_sequences_str(filename::String)
     open(filename) do f
         return [
-            (id = identifier(x), sequence = string(sequence(x))) for x in FASTA.Reader(f)
+            (id = identifier(x), sequence = sequence(String, x)) for x in FASTA.Reader(f)
         ]
     end
 end
