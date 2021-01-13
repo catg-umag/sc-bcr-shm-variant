@@ -9,7 +9,6 @@ include("../lib/julia/others.jl")
 
 function main()
     args = parse_arguments()
-    print(args)
 
     # load data
     reference = get_reference(args["reference"], args["name"])

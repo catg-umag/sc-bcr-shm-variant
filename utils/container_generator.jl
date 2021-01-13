@@ -5,11 +5,11 @@ mkpath("container")
 cd("container")
 
 pkgs = [
-    (name = "ArgParse", version = "1.1.0")
+    (name = "ArgParse", version = "1.1.1")
     (name = "BioAlignments", version = "2.0.0")
     (name = "BioSequences", version = "2.0.5")
     (name = "CodecZlib", version = "0.7.0")
-    (name = "CSV", version = "0.8.0")
+    (name = "CSV", version = "0.8.2")
     (name = "DataStructures", version = "0.17.20")
     (name = "Edlib", version = "0.1.1")
     (name = "FASTX", version = "1.1.3")
