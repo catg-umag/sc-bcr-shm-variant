@@ -145,21 +145,22 @@ Gets coverages from V(D)J and CDR regions
 function get_coverages(depths::Vector{Int64}, regions::NamedTuple)::NamedTuple
     cdrs = ["cdr1", "cdr2", "cdr3"]
     cdrs = filter(
-        x -> all(Symbol("$(x)_$(y)") in keys(regions) for y in ("start", "end")),
+        x -> all(not_missing_key(regions, "$(x)_$(y)") for y in ("start", "end")),
         cdrs,
     )
     vdj_coverage = cdr_coverage = 0.0
     for (i, d) in enumerate(depths)
         if d > 0
-            if all(Symbol("vdj_$(y)") in keys(regions) for y in ("start", "end")) &&
+            if all(not_missing_key(regions, "vdj_$(y)") for y in ("start", "end")) &&
                (regions.vdj_start <= i <= regions.vdj_end)
                 vdj_coverage += 1
-            end
-            if any(
-                regions[Symbol("$(cdr)_start")] <= i <= regions[Symbol("$(cdr)_end")] for
-                cdr in cdrs
-            )
-                cdr_coverage += 1
+
+                if any(
+                    regions[Symbol("$(cdr)_start")] <= i <= regions[Symbol("$(cdr)_end")]
+                    for cdr in cdrs
+                )
+                    cdr_coverage += 1
+                end
             end
         end
     end
@@ -256,6 +257,12 @@ end
 
 @inline function is_valid(record::BAM.Record)
     return BAM.isprimary(record) && BAM.isfilled(record) && BAM.ismapped(record)
+end
+
+
+@inline function not_missing_key(tuple::NamedTuple, key::String)::Bool
+    key_sym = Symbol(key)
+    return haskey(tuple, key_sym) && !ismissing(tuple[key_sym])
 end
 
 

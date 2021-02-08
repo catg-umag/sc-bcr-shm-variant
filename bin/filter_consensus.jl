@@ -8,7 +8,9 @@ function main()
 
     passed_consensus = filter(
         x ->
-            x.nreads >= args["min_reads"] &&
+            isa(x.ref_vdj_coverage, Float64) &&
+                isa(x.ref_cdr_coverage, Float64) &&
+                x.nreads >= args["min_reads"] &&
                 x.ref_vdj_coverage >= args["min_vdj_cov"] &&
                 x.ref_cdr_coverage >= args["min_cdr_cov"],
         CSV.File(args["input_consensus"]),
