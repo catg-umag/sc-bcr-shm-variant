@@ -27,6 +27,12 @@ end
 end
 
 
+@inline function get_barcodes_seqs_as_str(record::FASTQ.Record)::Tuple{String, String}
+    sequence = FASTX.sequence(record)
+    return (string(@view sequence[1:16]), string(@view sequence[17:26]))
+end
+
+
 @inline function auto_gzopen(filepath)
     return endswith(filepath, ".gz") ? GzipDecompressorStream(open(filepath)) :
            open(filepath)

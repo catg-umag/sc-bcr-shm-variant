@@ -20,20 +20,19 @@ function main()
         for subject in vcat(subjects, "NA")
     )
 
-    for (barcodes, r1, r2) in zip(
-        CSV.File(args["barcodes"]),
+    for (r1, r2) in zip(
         FASTQ.Reader(auto_gzopen(args["reads_r1"])),
         FASTQ.Reader(auto_gzopen(args["reads_r2"])),
     )
-        cell = barcodes.cell
+        cellbc, umi = split(FASTX.identifier(r1), ":")[end-1: end]
 
-        if !isnothing(cell) && haskey(subjects_from_cell, cell)
-            subject = subjects_from_cell[cell]
+        if !isnothing(cellbc) && haskey(subjects_from_cell, cellbc)
+            subject = subjects_from_cell[cellbc]
         else
             subject = "NA"
         end
 
-        write_record(fastq_writers[subject], r1, r2, args["experiment"], cell, barcodes.umi)
+        write_record(fastq_writers[subject], r1, r2, args["experiment"], string(cellbc), string(umi))
     end
 
     # close writers
@@ -72,9 +71,6 @@ function parse_arguments()
         "--r2"
             help = "R2 reads"
             dest_name = "reads_r2"
-            required = true
-        "--barcodes", "-b"
-            help = "Cell/UMI barcodes in a CSV file"
             required = true
         "--index", "-i"
             help = "experiment/cell/cluster index"

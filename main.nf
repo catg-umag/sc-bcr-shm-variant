@@ -9,15 +9,10 @@ include { build_cutadapt_args } from './lib/nextflow/utils'
  */
 cell_index = file(params.cell_index)
 cell_whitelist = file(params.cell_whitelist)
-region_positions = file(params.region_positions)
 
 channel
   .fromPath(params.references)
-  .splitFasta(record: [id: true, sequence: true])
-  .collectFile(storeDir: 'output/references') {
-    ["${it.id.replaceFirst(/_[HL]C/, '') }.fasta", ">${it.id}\n${it.sequence}"]
-  }
-  .map { [it.baseName, it] }
+  .map { [(it.baseName =~ /(.+)_([HKL])/)[0][1 .. -1], it].flatten() }
   .set { references }
 
 channel
@@ -35,24 +30,35 @@ channel
  * Workflow
  */
 workflow {
-  getBarcodeCorrections(reads, cell_whitelist)
+  // prepare references
+  references
+    .collectFile(newLine: true) {
+      ["${it[0]}.fasta", it[2].text]}
+    .map { [it.baseName, it] }
+    .set { references_by_subject }
 
+  references
+    .map { ["${it[0]}_${it[1]}", it[2]] }
+    .set { references_by_subject_chain }
+
+  references_by_subject_chain
+    | (referenceAlignment & getReferenceRegions) 
+
+
+  getBarcodeCorrections(reads, cell_whitelist)
   extractBarcodes(reads.join(getBarcodeCorrections.out))
   
   if (params.trim_adapters) {
-    trimAdaptersCutAdapt(extractBarcodes.out.reads)
+    trimAdaptersFastp(extractBarcodes.out)
     splitFastqBySample(
-      trimAdaptersCutAdapt.out.reads
-        .join(extractBarcodes.out.barcodes),
-        cell_index
-      )  
+      trimAdaptersFastp.out.reads,
+      cell_index
+    )  
   } else {
-    extractBarcodes.out.reads
-      .map { [it[0], [it[1], it[2]]] }
-      .join(extractBarcodes.out.barcodes)
-      .set { reads_with_barcodes }
-
-    splitFastqBySample(reads_with_barcodes, cell_index)
+    splitFastqBySample(
+      extractBarcodes.out.map { [it[0], [it[1], it[2]]] },
+      cell_index
+    )
   }
   
   splitFastqBySample.out
@@ -65,27 +71,74 @@ workflow {
 
   mergeLanes.out.reads
     .filter { it[0] =~ /K?B_S\d+/ }
-    .join(references)
+    .join(references_by_subject)
     .set { reads_with_ref }
 
   sortAndConvert(mapping(reads_with_ref))
-  
-  sortAndConvert.out.join(references)
-    .join(mergeLanes.out.info)
+
+  sortAndConvert.out
+    .cross(referenceAlignment.out.map { [it[0] - ~/_[HKL]$/, it].flatten() })
+    .map { it.flatten() }
+    .map { [it[4], it[1], it[2], it[5]] }
+    .join(getReferenceRegions.out)
     .set { consensus_pre_info }
 
   makeConsensus(consensus_pre_info)
+    | flatten
+    | filterConsensus
 
-  filterConsensus(makeConsensus.out.flatten(), region_positions) \
-  | sortConsensus
-
-  sortConsensus.out
+  filterConsensus.out
     .map { [it.baseName.replaceAll(/_.*/, ""), it] }
     .combine(external_consensus_with_name, by: 0)
     .map { it[1..2] }
     .set { cons_with_ext }
 
   searchSequences(cons_with_ext)
+}
+
+
+
+/*
+ * Does MSA on references
+ */
+process referenceAlignment {
+  tag "$name"
+  publishDir "output/references/msa", mode: 'copy'
+  
+  input:
+  tuple val(name), path(references)
+
+  output:
+  tuple val(name), path("${name}_msa.fasta")
+
+  script:
+  """
+  clustalo -i $references --wrap 10000 > ${name}_msa.fasta 
+  """
+}
+
+
+/*
+ * Gets refence VDJ and CDR positions
+ */
+process getReferenceRegions {
+  tag "$name"
+  publishDir "output/references/regions", mode: 'copy'
+  cpus 4
+
+  input:
+  tuple val(name), path(references)
+
+  output:
+  tuple val(name), path("${name}_regions.csv")
+  
+  script:
+  """
+  AssignGenes.py igblast -s $references -b /usr/local/share/igblast \
+    --outdir . --outname $name --format airr --nproc ${task.cpus}
+  
+  get_regions.py -i ${name}_igblast.tsv -o ${name}_regions.csv
+  """
 }
 
 
@@ -121,26 +174,28 @@ process getBarcodeCorrections {
 process extractBarcodes {
   tag "$name"
   label 'julia'
-  cpus 2
+  cpus 4
 
   input:
   tuple val(name), path(reads), path(corrections)
 
   output:
-  tuple val(name), path("${name}.r1.fastq.gz"), path(r2), emit: reads
-  tuple val(name), path("${name}_barcodes.csv"), emit: barcodes
+  tuple val(name), path("${name}.r1.fastq.gz"), path("${name}.r2.fastq.gz")
 
   script:
   (r1, r2) = reads.sort { it.simpleName }
   """
   export JULIA_NUM_THREADS=${task.cpus}
-  extract_barcodes.jl -r ${name}.r1.fastq.gz -b ${name}_barcodes.csv -c $corrections $r1
+  extract_barcodes.jl \
+    -o ${name}.r1.fastq.gz -O ${name}.r2.fastq.gz \
+    -i $r1 -I $r2 \
+    -c $corrections
   """
 }
 
 
 /*
- * Clean the sequence of primer sequences
+ * Clean the sequence of adapter sequences
  */
 process trimAdaptersCutAdapt {
   tag "$name"
@@ -177,7 +232,7 @@ process trimAdaptersCutAdapt {
 process trimAdaptersFastp {
   tag "$name"
   publishDir 'output/fastp/', pattern: "${name}_report*", mode: 'copy'
-  cpus 4
+  cpus 8
 
   input:
   tuple val(name), path(fastq_r1), path(fastq_r2)
@@ -191,7 +246,10 @@ process trimAdaptersFastp {
   fastp \
     -i ${fastq_r1} -I ${fastq_r2} \
     -o ${name}_clean.R1.fastq.gz -O ${name}_clean.R2.fastq.gz \
-    -c -g \
+    --disable_quality_filtering \
+    --trim_poly_g \
+    --trim_front1 15 --trim_tail1 2 --trim_front2 2 --trim_tail2 2 \
+    --cut_front --cut_tail --cut_mean_quality 30 \
     -w ${task.cpus} \
     -j ${name}_report.json -h ${name}_report.html
   """
@@ -208,7 +266,7 @@ process splitFastqBySample {
   memory 16.GB
 
   input:
-  tuple val(name), path(reads), path(barcodes)
+  tuple val(name), path(reads)
   path cell_index
 
   output:
@@ -219,7 +277,7 @@ process splitFastqBySample {
   exp = name.replaceAll(/_L\d+$/, '')
   """
   export JULIA_NUM_THREADS=${task.cpus}
-  split_fastq_by_sample.jl --r1 $r1 --r2 $r2 -b $barcodes -i $cell_index -n $exp
+  split_fastq_by_sample.jl --r1 $r1 --r2 $r2 -i $cell_index -n $exp
   pigz -p ${task.cpus} *.fastq
   """
 }
@@ -265,7 +323,7 @@ process mergeLanes {
  */
 process mapping {
   tag "$subject"
-  cpus 8
+  cpus 16
 
   input:
   tuple val(subject), path(reads), path(reference)
@@ -275,7 +333,7 @@ process mapping {
 
   script:
   """
-  minimap2 -a -xsr -k8 -w5 -A2 -B2 -O5,24 -E4,2 -t ${task.cpus} $reference $reads > ${subject}.sam
+  minimap2 -ax sr -t ${task.cpus} $reference $reads > ${subject}.sam
   """
 }
 
@@ -286,7 +344,7 @@ process mapping {
 process sortAndConvert {
   tag "$subject"
   publishDir "output/bam/${subject}", mode: 'copy'
-  cpus 4
+  cpus 8
 
   input:
   tuple val(subject), path(sam)
@@ -306,25 +364,29 @@ process sortAndConvert {
  * Make consensus from BAM
  */
 process makeConsensus {
-  tag "$subject"
+  tag "$name"
   label 'julia'
   publishDir "output/consensus/${subject}", mode: 'copy'
-  cpus 4
+  cpus 8
   memory { 32.GB * task.attempt }
   errorStrategy { task.exitStatus in 137..140 ? 'retry' : 'finish' }
   maxRetries 3
 
   input:
-  tuple val(subject), path(bam), path(bam_index), path(reference), path(barcodes)
+  tuple val(name), path(bam), path(bam_index), path(references), path(regions)
 
   output:
-  path('*.csv')
+  path("${name}.csv")
 
   script:
+  subject = name - ~/_[HKL]$/
   """
   export JULIA_NUM_THREADS=${task.cpus}
-  bcr_consensus.jl -o ${subject}_HC.csv $bam $barcodes $reference ${subject}_HC
-  bcr_consensus.jl -o ${subject}_LC.csv $bam $barcodes $reference ${subject}_LC
+  bcr_consensus.jl -o ${name}_unsrt.csv $bam $references $regions
+
+  # sort
+  head -n 1 ${name}_unsrt.csv > ${name}.csv
+  tail -n +2 ${name}_unsrt.csv | sort --field-separator=, --key=1,2 >> ${name}.csv
   """
 }
 
@@ -334,49 +396,26 @@ process makeConsensus {
  */
 process filterConsensus {
   tag "$subject_chain"
+  publishDir "output/filtered_consensus/${subject}", mode: 'copy'
   label 'julia'
   cpus 2
 
   input:
   path consensus_file
-  path region_positions
   
   output:
   path "${subject_chain}.fasta"
   
   script:
   subject_chain = consensus_file.baseName
+  subject = subject_chain - ~/_[HL]C/
   """
   export JULIA_NUM_THREADS=${task.cpus}
   filter_consensus.jl \
-  --min-vdj-coverage ${params.consensus_rules.vdj_coverage} \
-  --min-cdr-coverage ${params.consensus_rules.cdr_coverage} \
-  --min-reads ${params.consensus_rules.reads} \
-  --reference-name ${consensus_file.baseName} \
-  -o ${subject_chain}.fasta $consensus_file $region_positions
-  """
-}
-
-
-/*
- * Sort filtered consensus by id
- */
-process sortConsensus {
-  tag "${consensus_file.baseName}"
-  publishDir "output/filtered_consensus/${subject}", \
-    mode: 'copy', saveAs: { "${subject_chain}.fasta" }
-
-  input:
-  path consensus_file
-
-  output:
-  path "${subject_chain}_sorted.fasta"
-  
-  script:
-  subject_chain = consensus_file.baseName
-  subject = subject_chain - ~/_[HL]C/
-  """
-  seqkit sort $consensus_file -w0 > ${subject_chain}_sorted.fasta
+    --min-vdj-coverage ${params.consensus_rules.vdj_coverage} \
+    --min-cdr-coverage ${params.consensus_rules.cdr_coverage} \
+    --min-reads ${params.consensus_rules.reads} \
+    -o ${subject_chain}.fasta $consensus_file
   """
 }
 

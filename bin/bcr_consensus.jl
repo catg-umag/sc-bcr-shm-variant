@@ -11,39 +11,57 @@ function main()
     args = parse_arguments()
 
     # load data
-    reference = get_reference(args["reference"], args["name"])
-    info_dict = Dict(
-        row.id => Dict(:cell => Symbol(row.cell), :umi => Symbol(row.umi))
-        for row in CSV.File(args["index"])
-    )
-
-    records = load_records(args["bamfile"], info_dict, args["name"])
+    references = load_references(args["references"])
+    ref_position_maps = Dict(k => get_reference_position_maps(v) for (k, v) in references)
+    records = load_records(args["bamfile"], Set(keys(references)))
+    regions = load_regions(args["reference_regions"])
 
     open(args["output"], "w") do f
-        write(f, "cell,umi,nrecords,ref_coverage,consensus,filled_consensus,depths\n")
+        write(
+            f,
+            "cell,umi,nreads,ref_vdj_coverage,ref_cdr_coverage,gapped_consensus,consensus,depths\n",
+        )
 
         Threads.@threads for cell in collect(eachindex(records))
             cell_records = records[cell]
+            position_counters = [DNACounter() for _ = 1:length(last(first(references)))]
+            reference_counters = Dict(k => 0 for k in keys(references))
             for umi in keys(cell_records)
-                nrecords = length(cell_records[umi])
-                consensus, depths =
-                    make_consensus!(cell_records[umi], reference, fill_with_reference = false)
-                coverage = length(filter(x -> x > 0, depths)) / length(depths)
-
-                # fill Ns in consensus with reference
-                filled_consensus = copy(consensus)
-                for i in eachindex(filled_consensus)
-                    if filled_consensus[i] == DNA_N
-                        filled_consensus[i] = reference[i]
-                    end
+                # reset counters
+                for c in position_counters
+                    reset!(c)
+                end
+                for k in keys(reference_counters)
+                    reference_counters[k] = 0
                 end
 
-                # write result
-                write(
-                    f,
-                    "$(string(cell)),$(string(umi)),$(nrecords),$(coverage)," *
-                    "$(string(LongDNASeq(consensus))),$(string(LongDNASeq(filled_consensus))),$(join(depths, ';'))\n",
+                nrecords = length(cell_records[umi])
+                consensus, depths, refname = make_consensus!(
+                    cell_records[umi],
+                    references,
+                    ref_position_maps,
+                    position_counters,
+                    reference_counters,
                 )
+
+                # "ungap" consensus and depth
+                ungapped_consensus = clean_consensus(consensus)
+                depths = [x for (i, x) in enumerate(depths) if consensus[i] != DNA_Gap]
+
+                coverages = get_coverages(depths, regions[refname])
+
+                # write result
+                row = [
+                    string(cell),
+                    string(umi),
+                    nrecords,
+                    coverages.vdj,
+                    coverages.cdr,
+                    string(LongDNASeq(consensus)),
+                    ungapped_consensus,
+                    join(depths, ";"),
+                ]
+                write(f, join(row, ",") * "\n")
             end
         end
     end
@@ -51,115 +69,173 @@ end
 
 
 """
-    make_consensus!(records, reference)
+    make_consensus!(records, references, references_positions_maps, position_counters, reference_counters)
 
 Creates a consensus sequence by frequency, filling the gaps with the reference sequence.
 Returns the consensus and a vector with the depth for each reference position.
 """
 function make_consensus!(
-    records::Vector{BAM.Record },
-    reference::LongSequence;
-    fill_with_reference::Bool = true,
-)::Tuple{Vector{DNA},Vector{Int64}}
-    sort!(records, by = x -> BAM.position(x))
+    records::Vector{BAM.Record},
+    references::Dict{String,LongSequence},
+    references_positions_maps::Dict{String,Vector{Int64}},
+    position_counters::Vector{DNACounter{Float64}},
+    reference_counters::Dict{String,Int64},
+)::Tuple{Vector{DNA},Vector{Int64},String}
+    reference_length = length(position_counters)
 
-    pos_counts_start = DefaultOrderedDict{Int,Int}(0)
-    for r in records
-        pos_counts_start[BAM.position(r)] += 1
+    consensus = fill(DNA_N, reference_length)
+    depth = fill(0, reference_length)
+
+    for record in records
+        sequence = BAM.sequence(record)
+        quality = BAM.quality(record)
+        refname = BAM.refname(record)
+        ref_positions = references_positions_maps[refname]
+
+        pos = 1
+        ref_pos = BAM.position(record)
+        for (op, n) in zip(BAM.cigar_rle(record)...)
+            if op in (OP_SOFT_CLIP, OP_INSERT)
+                pos += n
+            elseif op == OP_DELETE
+                ref_pos += n
+            elseif op == OP_MATCH
+                for i = 0:(n-1)
+                    corr_pos = ref_positions[ref_pos+i]
+                    add!(
+                        position_counters[corr_pos],
+                        sequence[pos+i],
+                        (10^(quality[pos+i] / 10)),
+                    )
+                    depth[corr_pos] += 1
+                end
+                pos += n
+                ref_pos += n
+            end
+
+        end
+        reference_counters[refname] += 1
     end
 
-    # in reverse order to pop from first to last
-    reverse!(records)
-
-    consensus = fill(DNA_N, length(reference))
-    depth = fill(0, length(reference))
-    current_reads = MutableLinkedList{SeqRecord}()
-    dna_counter = DNACounter()
-    pos = nothing
-
-    while (!isempty(records))
-        if isnothing(pos) || isempty(current_reads)
-            pos = first(pos_counts_start).first
-        end
-
-        if haskey(pos_counts_start, pos)
-            nreads = pop!(pos_counts_start, pos)
-            for i = 1:nreads
-                push!(current_reads, bam_record_to_seq(pop!(records)))
-            end
-        end
-
-        reset!(dna_counter)
-        idx = 1
-        for read in current_reads
-            if pos < read.startpos + read.length
-                add!(
-                    dna_counter,
-                    read.sequence[pos-read.startpos+1],
-                    (10^(read.quality[pos-read.startpos+1] / 10)),
-                )
-
-                idx += 1
-                depth[pos] += 1
-            else
-                delete!(current_reads, idx)
-            end
-        end
-
-        # replace base in consensus
-        consensus[pos] = dna_counter.dna_bases[argmax(dna_counter.counters)]
-        pos += 1
-    end
-
-    if fill_with_reference
-        # fill Ns in consensus with reference nucleotide
-        for i = 1:length(consensus)
-            if consensus[i] == DNA_N
-                consensus[i] = reference[i]
-            end
+    for pos in eachindex(consensus)
+        counter = position_counters[pos]
+        if counter.sum > 0
+            consensus[pos] = counter.dna_bases[argmax(counter.counters)]
         end
     end
 
-    return consensus, depth
+    # add reference gaps
+    most_used_refname = last(findmax(reference_counters))
+    most_used_ref = references[most_used_refname]
+    for i in eachindex(most_used_ref)
+        if most_used_ref[i] == DNA_Gap
+            consensus[i] = DNA_Gap
+        end
+    end
+
+    return consensus, depth, most_used_refname
 end
 
 
 """
-    read_reference(references_file, name)
+    get_coverages(depths, regions)
+
+Gets coverages from V(D)J and CDR regions
+"""
+function get_coverages(depths::Vector{Int64}, regions::NamedTuple)::NamedTuple
+    cdrs = ["cdr1", "cdr2", "cdr3"]
+    cdrs = filter(
+        x -> all(Symbol("$(x)_$(y)") in keys(regions) for y in ("start", "end")),
+        cdrs,
+    )
+    vdj_coverage = cdr_coverage = 0.0
+    for (i, d) in enumerate(depths)
+        if d > 0
+            if all(Symbol("vdj_$(y)") in keys(regions) for y in ("start", "end")) &&
+               (regions.vdj_start <= i <= regions.vdj_end)
+                vdj_coverage += 1
+            end
+            if any(
+                regions[Symbol("$(cdr)_start")] <= i <= regions[Symbol("$(cdr)_end")] for
+                cdr in cdrs
+            )
+                cdr_coverage += 1
+            end
+        end
+    end
+
+    vdj_coverage = vdj_coverage / (regions.vdj_end - regions.vdj_start + 1)
+    cdr_coverage =
+        cdr_coverage / sum(
+            regions[Symbol("$(cdr)_end")] - regions[Symbol("$(cdr)_start")] + 1 for
+            cdr in cdrs
+        )
+
+    return (vdj = vdj_coverage, cdr = cdr_coverage)
+end
+
+
+"""
+    clean_consensus(consensus)
+
+Clean consensus from gaps and undefined bases (N) on both ends
+"""
+function clean_consensus(consensus::Vector{DNA})::String
+    # first, delete gaps
+    clean_consensus = string(LongDNASeq([x for x in consensus if x != DNA_Gap]))
+    # next, delete N's at both ends
+    clean_consensus = replace(clean_consensus, r"^N*|N*$" => "")
+
+    return clean_consensus
+end
+
+
+"""
+    load_references(references_file)
 
 Loads and returns a specific sequence from a FASTA file.
 """
-function get_reference(references_filename::String, name::String)::LongSequence
-    reader = open(FASTA.Reader, references_filename)
-    record = FASTA.Record()
-    while !eof(reader)
-        read!(reader, record)
-
-        if identifier(record) == name
-            return sequence(record)
-        end
+function load_references(references_filename::String)::Dict{String,LongSequence}
+    references = Dict()
+    for record in open(FASTA.Reader, references_filename)
+        references[identifier(record)] = FASTX.sequence(record)
     end
+
+    return references
 end
 
 
 """
-    load_records(records_filename, reads_info)
+    get_reference_position_maps(sequence)
+
+Get "new" positions from old positions using gaps
+"""
+function get_reference_position_maps(sequence::LongSequence)::Vector{Int64}
+    maps = Int64[]
+    for (i, x) in enumerate(sequence)
+        if x != DNA_Gap
+            push!(maps, i)
+        end
+    end
+
+    return maps
+end
+
+
+"""
+    load_records(records_filename, selected_references)
 
 Loads records in a dictionary by Cell and UMI.
 """
-function load_records(
-    records_filename::String,
-    reads_info::Dict,
-    reference_name::String,
-)::Dict
+function load_records(records_filename::String, selected_references::Set{String})::Dict
     reads_dict = Dict()
     for record in BAM.Reader(open(records_filename))
-        # only keep reads where both mates are aligned against the same reference
-        if is_valid(record) && BAM.refname(record) == reference_name
-            cell = Symbol(reads_info[BAM.tempname(record)][:cell])
-            umi = Symbol(reads_info[BAM.tempname(record)][:umi])
+        if is_valid(record) && BAM.refname(record) in selected_references
+            id_splitted = split(BAM.tempname(record), ":")
+            cellbc = string(id_splitted[end-1])
+            umi = string(id_splitted[end])
 
-            cell_reads = get!(reads_dict, cell, Dict())
+            cell_reads = get!(reads_dict, cellbc, Dict())
             if haskey(cell_reads, umi)
                 push!(cell_reads[umi], record)
             else
@@ -172,11 +248,14 @@ function load_records(
 end
 
 
+function load_regions(regions_filename::String)::Dict
+    regions = Dict(row.sequence_id => NamedTuple(row) for row in CSV.File(regions_filename))
+    return regions
+end
+
+
 @inline function is_valid(record::BAM.Record)
-    return BAM.isfilled(record) &&
-           BAM.ismapped(record) &&
-           BAM.isnextmapped(record) &&
-           BAM.refid(record) == BAM.nextrefid(record)
+    return BAM.isprimary(record) && BAM.isfilled(record) && BAM.ismapped(record)
 end
 
 
@@ -191,14 +270,11 @@ function parse_arguments()
         "bamfile"
             help = "BAM file containing reads"
             required = true
-        "index"
-            help = "List containg Cell and UMI correction for each read"
+        "references"
+            help = "FASTA file containing aligned reference sequences"
             required = true
-        "reference"
-            help = "FASTA file containing reference sequence"
-            required = true
-        "name"
-            help = "Reference to use"
+        "reference_regions"
+            help = "CSV file containing VDJ and CDR region positions"
             required = true
         #! format: on
     end
