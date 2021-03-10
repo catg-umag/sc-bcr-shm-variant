@@ -488,6 +488,9 @@ process selectReference {
 
 
 process splitFastqByReference {
+  tag "$subject_chain"
+  label 'julia'
+
   input:
   tuple val(subject_chain), path(reads), path(reference_index)
 
