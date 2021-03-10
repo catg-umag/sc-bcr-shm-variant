@@ -577,7 +577,7 @@ process filterConsensus {
   
   script:
   subject_chain = consensus_file.baseName
-  subject = subject_chain - ~/_[HL]C/
+  subject = subject_chain - ~/_[HKL]/
   """
   export JULIA_NUM_THREADS=${task.cpus}
   filter_consensus.jl \
@@ -601,7 +601,7 @@ process getShmPlaces {
   tuple val(name), path("${name}_shm.csv")
 
   script:
-  subject = name - ~/_[HL]C/
+  subject = name - ~/_[HKL]/
   """
   get_shm_places.py -i $consensus_summary -o ${name}_shm.csv
   """
