@@ -26,7 +26,7 @@ def main():
         subdf = df[df.cell == cell]
         umis = subdf.umi
         sequences = subdf.aligned_consensus.values
-        depths = subdf.depths.values
+        depths = [x.split(";") for x in subdf.depths.values]
 
         for i in range(len(sequences[0])):
             cons = set(s[i] for s in sequences) - set(("-", "N"))
@@ -47,7 +47,7 @@ def main():
                     sum(counts.values()) >= args.min_umis
                     and ratios[1] >= args.min_ratio
                 ):
-                    for (umi, seq) in zip(umis, sequences):
+                    for (umi, seq, d) in zip(umis, sequences, depths):
                         if seq[i] not in ("N", "-"):
                             variants.append(
                                 {
@@ -56,7 +56,7 @@ def main():
                                     "pos": i + 1,
                                     "cons_nucl": cons_nucl,
                                     "nucl": seq[i],
-                                    "depth": depths[i]
+                                    "depth": d[i]
                                 }
                             )
 
