@@ -10,7 +10,7 @@ def main():
     df = (
         pd.read_csv(args.input)
         .query("ref_vdj_coverage == 1")
-        .drop(columns=["consensus", "depths"])
+        .drop(columns=["consensus"])
     )
 
     selected_cells = (

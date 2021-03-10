@@ -598,11 +598,11 @@ process getShmPlaces {
   tuple val(name), path(consensus_summary)
 
   output:
-  tuple val(name), path("${name}.csv")
+  tuple val(name), path("${name}_shm.csv")
 
   script:
   """
-  get_shm_places.py -i $consensus_summary -o ${name}.csv
+  get_shm_places.py -i $consensus_summary -o ${name}_shm.csv
   """
 }
 
