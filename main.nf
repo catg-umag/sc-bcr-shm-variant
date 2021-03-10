@@ -601,6 +601,7 @@ process getShmPlaces {
   tuple val(name), path("${name}_shm.csv")
 
   script:
+  subject = name - ~/_[HL]C/
   """
   get_shm_places.py -i $consensus_summary -o ${name}_shm.csv
   """
