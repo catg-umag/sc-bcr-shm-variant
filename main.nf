@@ -181,7 +181,6 @@ workflow BuildConsensus {
       .set { consensus_pre_info }
 
     makeConsensus(consensus_pre_info)
-      | flatten
       | (filterConsensus & getShmPlaces)
 }
 
