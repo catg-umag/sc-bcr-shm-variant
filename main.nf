@@ -571,7 +571,7 @@ process filterConsensus {
   cpus 2
 
   input:
-  path consensus_file
+  tuple val(name), path(consensus_file)
   
   output:
   path "${subject_chain}.fasta"
