@@ -30,70 +30,159 @@ channel
  * Workflow
  */
 workflow {
-  // prepare references
-  references
-    .collectFile(newLine: true) {
-      ["${it[0]}.fasta", it[2].text]}
-    .map { [it.baseName, it] }
-    .set { references_by_subject }
+  // references_by_subject_chain
+  //   | (referenceAlignment & getReferenceRegions)
 
-  references
-    .map { ["${it[0]}_${it[1]}", it[2]] }
-    .set { references_by_subject_chain }
+  Preprocessing(reads, cell_index, cell_whitelist)
+  PrepareReferences(Preprocessing.out, references)
+  BuildConsensus(PrepareReferences.out.reads, PrepareReferences.out.references, references)
 
-  references_by_subject_chain
-    | (referenceAlignment & getReferenceRegions) 
+  // filterConsensus.out
+  //   .map { [it.baseName.replaceAll(/_.*/, ""), it] }
+  //   .combine(external_consensus_with_name, by: 0)
+  //   .map { it[1..2] }
+  //   .set { cons_with_ext }
+
+  // searchSequences(cons_with_ext)
+}
 
 
-  getBarcodeCorrections(reads, cell_whitelist)
-  extractBarcodes(reads.join(getBarcodeCorrections.out))
-  
-  if (params.trim_adapters) {
-    trimAdaptersFastp(extractBarcodes.out)
-    splitFastqBySample(
-      trimAdaptersFastp.out.reads,
-      cell_index
-    )  
-  } else {
-    splitFastqBySample(
-      extractBarcodes.out.map { [it[0], [it[1], it[2]]] },
-      cell_index
-    )
-  }
-  
-  splitFastqBySample.out
-    .transpose()
-    .map { [it[0].simpleName.replaceAll(/_L\d+$/, '')] + it }
-    .groupTuple()
-    .set { grouped_lanes }
+workflow Preprocessing {
+  take:
+    reads
+    cell_index
+    cell_whitelist
 
-  mergeLanes(grouped_lanes)
+  main:
+    // correct and extract barcodes
+    getBarcodeCorrections(reads, cell_whitelist)
+    extractBarcodes(reads.join(getBarcodeCorrections.out))
+    
+    // trim adapters
+    if (params.trim_adapters) {
+      trimAdaptersFastp(extractBarcodes.out)
+      splitFastqBySample(
+        trimAdaptersFastp.out.reads,
+        cell_index
+      )  
+    } else {
+      splitFastqBySample(
+        extractBarcodes.out.map { [it[0], [it[1], it[2]]] },
+        cell_index
+      )
+    }
+    
+    // split FASTQ files by sample and merge lanes
+    splitFastqBySample.out
+      .transpose()
+      .map { [it[0].simpleName.replaceAll(/_L\d+$/, '')] + it }
+      .groupTuple()
+      .set { grouped_lanes }
 
-  mergeLanes.out.reads
-    .filter { it[0] =~ /K?B_S\d+/ }
-    .join(references_by_subject)
-    .set { reads_with_ref }
+    mergeLanes(grouped_lanes)    
 
-  sortAndConvert(mapping(reads_with_ref))
+  emit:
+    mergeLanes.out.reads
+}
 
-  sortAndConvert.out
-    .cross(referenceAlignment.out.map { [it[0] - ~/_[HKL]$/, it].flatten() })
-    .map { it.flatten() }
-    .map { [it[4], it[1], it[2], it[5]] }
-    .join(getReferenceRegions.out)
-    .set { consensus_pre_info }
 
-  makeConsensus(consensus_pre_info)
-    | flatten
-    | filterConsensus
+workflow PrepareReferences {
+  take:
+    reads
+    references
 
-  filterConsensus.out
-    .map { [it.baseName.replaceAll(/_.*/, ""), it] }
-    .combine(external_consensus_with_name, by: 0)
-    .map { it[1..2] }
-    .set { cons_with_ext }
+  main:
+    // prepare references
+    references
+      .collectFile(newLine: true) {
+        ["${it[0]}.fasta", it[2].text]}
+      .map { [it.baseName, it] }
+      .set { references_by_subject }
 
-  searchSequences(cons_with_ext)
+    references
+      .map { ["${it[0]}_${it[1]}", it[2]] }
+      .set { references_by_subject_chain }
+
+    // align the reads against all references
+    reads
+      .filter { it[0] =~ /K?B_S\d+/ }
+      .join(references_by_subject)
+      .set { reads_with_ref }
+
+    sortAndConvert(mapping(reads_with_ref))
+
+    // select best reference for each cell based on previous alignment
+    sortAndConvert.out
+      .join(
+        references
+          .map { [it[0], it[2].simpleName] }
+          .groupTuple())
+      .set { bam_with_reference_names }
+
+    selectReference(bam_with_reference_names)
+
+    reads
+      .combine(
+        selectReference.out
+          .flatMap { it[1].collect { x -> [it[0], x] } },
+        by: 0)
+      .map { [it[2].simpleName, it[1], it[2]] }
+      .set { reads_with_ref_index }
+
+    // split FASTQ files by their best reference
+    splitFastqByReference(reads_with_ref_index)
+
+    splitFastqByReference.out
+      .flatMap {
+        [it[1], it[2]].transpose()
+          .collect { x -> [it[0], x[0].simpleName.split("--")[1], x] } }
+      .set { splitted_reads }
+
+    separateReferences(references_by_subject_chain)
+      .flatMap { it[1].collect { x -> [it[0], x.baseName, x] } }
+      .set { splitted_references }
+
+  emit:
+    reads = splitted_reads
+    references = splitted_references 
+}
+
+
+workflow BuildConsensus {
+  take:
+    splitted_reads
+    splitted_references
+    references
+
+  main:
+    references
+      .map { ["${it[0]}_${it[1]}", it[2]] }
+      .set { references_by_subject_chain }
+
+    getReferenceRegions(references_by_subject_chain)
+
+    splitted_reads.join(splitted_references, by: [0, 1])
+      .map { ["${it[0]}--${it[1]}", it[2], it[3] ] }
+      .set { splitted_reads_with_ref }
+
+
+    sortAndConvert(mapping(splitted_reads_with_ref))
+
+    sortAndConvert.out
+      .map { [it[0].split("--")[0]] + it[1..2] }
+      .groupTuple()
+      .set { grouped_bams }
+
+    mergeBams(grouped_bams)
+
+    mergeBams.out
+      .join(references_by_subject_chain)
+      .join(getReferenceRegions.out)
+      .set { consensus_pre_info }
+
+    makeConsensus(consensus_pre_info)
+      | flatten
+      | (filterConsensus & getShmPlaces)
 }
 
 
@@ -119,7 +208,7 @@ process referenceAlignment {
 
 
 /*
- * Gets refence VDJ and CDR positions
+ * Gets reference VDJ and CDR positions
  */
 process getReferenceRegions {
   tag "$name"
@@ -142,6 +231,23 @@ process getReferenceRegions {
 }
 
 
+process separateReferences {
+  tag "$name"
+
+  input:
+  tuple val(name), path(references)
+  
+  output:
+  tuple val(name), path("${name}/*.fa")
+
+  script:
+  """
+  mkdir ${name}/
+  faSplit byname $references ${name}/ 
+  """
+}
+
+
 /*
  * Corrects barcodes and saves them in a JSON file.
  */
@@ -150,7 +256,7 @@ process getBarcodeCorrections {
   publishDir "output/bc_corrections/", pattern: '*.json', mode: 'copy'
   label 'julia'
   cpus 1
-  memory 16.GB
+  memory 10.GB
 
   input:  
   tuple val(name), path(reads)
@@ -174,7 +280,7 @@ process getBarcodeCorrections {
 process extractBarcodes {
   tag "$name"
   label 'julia'
-  cpus 4
+  cpus 2
 
   input:
   tuple val(name), path(reads), path(corrections)
@@ -232,7 +338,7 @@ process trimAdaptersCutAdapt {
 process trimAdaptersFastp {
   tag "$name"
   publishDir 'output/fastp/', pattern: "${name}_report*", mode: 'copy'
-  cpus 8
+  cpus 4
 
   input:
   tuple val(name), path(fastq_r1), path(fastq_r2)
@@ -263,7 +369,7 @@ process splitFastqBySample {
   tag "$name"
   label 'julia'
   cpus 4
-  memory 16.GB
+  memory 2.GB
 
   input:
   tuple val(name), path(reads)
@@ -323,7 +429,8 @@ process mergeLanes {
  */
 process mapping {
   tag "$subject"
-  cpus 16
+  cpus 8
+  memory 4.GB
 
   input:
   tuple val(subject), path(reads), path(reference)
@@ -343,7 +450,7 @@ process mapping {
  */
 process sortAndConvert {
   tag "$subject"
-  publishDir "output/bam/${subject}", mode: 'copy'
+  label 'samtools'
   cpus 8
 
   input:
@@ -356,6 +463,65 @@ process sortAndConvert {
   """
   samtools sort -@ ${task.cpus} $sam -o ${subject}.bam
   samtools index ${subject}.bam
+  """
+}
+
+
+process selectReference {
+  tag "$subject"
+  label 'julia'
+  publishDir "output/cell_references/", mode: 'copy'
+
+  input:
+  tuple val(subject), path(bam), path(bam_index), val(reference_names)
+
+  output:
+  tuple val(subject), path("*.csv")
+  
+  script:
+  // H should be before either K or L
+  reference_names = reference_names.sort()
+  """
+  select_reference.jl -i $bam -H ${reference_names[0]}.csv -L ${reference_names[1]}.csv
+  """
+}
+
+
+process splitFastqByReference {
+  input:
+  tuple val(subject_chain), path(reads), path(reference_index)
+
+  output:
+  tuple \
+    val(subject_chain), \
+    path("${subject_chain}_split/*.r1.fastq"), \
+    path("${subject_chain}_split/*.r2.fastq")
+
+  script:
+  (r1, r2) = reads.sort { it.name }
+  """
+  split_fastq_by_reference.jl $r1 $r2 $reference_index -o ${subject_chain}_split
+  """
+}
+
+
+process mergeBams {
+  tag "$subject_chain"
+  label 'samtools'
+  publishDir "output/bam/${subject}", mode: 'copy'
+  cpus 4
+
+  input:
+  tuple val(subject_chain), path(bam_files), path(bam_indexes)
+
+  output:
+  tuple val(subject_chain), path("${subject_chain}.bam"), path("${subject_chain}.bam.bai")
+
+  script:
+  subject = subject_chain - ~/_[HKL]/
+  """
+  samtools merge -@ ${task.cpus} ${subject_chain}.bam $bam_files
+  samtools index ${subject_chain}.bam
   """
 }
 
@@ -376,7 +542,7 @@ process makeConsensus {
   tuple val(name), path(bam), path(bam_index), path(references), path(regions)
 
   output:
-  path("${name}.csv")
+  tuple val(name), path("${name}.csv")
 
   script:
   subject = name - ~/_[HKL]$/
@@ -385,6 +551,7 @@ process makeConsensus {
   bcr_consensus.jl -o ${name}_unsrt.csv $bam $references $regions
 
   # sort
+  export TMPDIR=.
   head -n 1 ${name}_unsrt.csv > ${name}.csv
   tail -n +2 ${name}_unsrt.csv | sort --field-separator=, --key=1,2 >> ${name}.csv
   """
@@ -416,6 +583,24 @@ process filterConsensus {
     --min-cdr-coverage ${params.consensus_rules.cdr_coverage} \
     --min-reads ${params.consensus_rules.reads} \
     -o ${subject_chain}.fasta $consensus_file
+  """
+}
+
+
+process getShmPlaces {
+  tag "$name"
+  publishDir "output/shm/${subject}", mode: 'copy'
+  label 'pandas'
+
+  input:
+  tuple val(name), path(consensus_summary)
+
+  output:
+  tuple val(name), path("${name}.csv")
+
+  script:
+  """
+  get_shm_places.py -i $consensus_summary -o ${name}.csv
   """
 }
 

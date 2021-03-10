@@ -12,42 +12,21 @@ function main()
 
     # load data
     references = load_references(args["references"])
-    ref_position_maps = Dict(k => get_reference_position_maps(v) for (k, v) in references)
     records = load_records(args["bamfile"], Set(keys(references)))
     regions = load_regions(args["reference_regions"])
 
     open(args["output"], "w") do f
         write(
             f,
-            "cell,umi,nreads,ref_vdj_coverage,ref_cdr_coverage,gapped_consensus,consensus,depths\n",
+            "cell,umi,nreads,ref_vdj_coverage,ref_cdr_coverage,consensus,aligned_consensus,depths\n",
         )
 
         Threads.@threads for cell in collect(eachindex(records))
             cell_records = records[cell]
-            position_counters = [DNACounter() for _ = 1:length(last(first(references)))]
-            reference_counters = Dict(k => 0 for k in keys(references))
             for umi in keys(cell_records)
-                # reset counters
-                for c in position_counters
-                    reset!(c)
-                end
-                for k in keys(reference_counters)
-                    reference_counters[k] = 0
-                end
-
                 nrecords = length(cell_records[umi])
-                consensus, depths, refname = make_consensus!(
-                    cell_records[umi],
-                    references,
-                    ref_position_maps,
-                    position_counters,
-                    reference_counters,
-                )
-
-                # "ungap" consensus and depth
-                ungapped_consensus = clean_consensus(consensus)
-                depths = [x for (i, x) in enumerate(depths) if consensus[i] != DNA_Gap]
-
+                consensus, depths, refname = make_consensus!(cell_records[umi], references)
+                cleaned_consensus = clean_consensus(consensus)
                 coverages = get_coverages(depths, regions[refname])
 
                 # write result
@@ -57,8 +36,8 @@ function main()
                     nrecords,
                     coverages.vdj,
                     coverages.cdr,
+                    cleaned_consensus,
                     string(LongDNASeq(consensus)),
-                    ungapped_consensus,
                     join(depths, ";"),
                 ]
                 write(f, join(row, ",") * "\n")
@@ -77,11 +56,11 @@ Returns the consensus and a vector with the depth for each reference position.
 function make_consensus!(
     records::Vector{BAM.Record},
     references::Dict{String,LongSequence},
-    references_positions_maps::Dict{String,Vector{Int64}},
-    position_counters::Vector{DNACounter{Float64}},
-    reference_counters::Dict{String,Int64},
 )::Tuple{Vector{DNA},Vector{Int64},String}
-    reference_length = length(position_counters)
+    refname = BAM.refname(records[1])
+    reference = references[refname]
+    reference_length = length(reference)
+    position_counters = [DNACounter() for _ = 1:reference_length]
 
     consensus = fill(DNA_N, reference_length)
     depth = fill(0, reference_length)
@@ -89,8 +68,6 @@ function make_consensus!(
     for record in records
         sequence = BAM.sequence(record)
         quality = BAM.quality(record)
-        refname = BAM.refname(record)
-        ref_positions = references_positions_maps[refname]
 
         pos = 1
         ref_pos = BAM.position(record)
@@ -101,20 +78,18 @@ function make_consensus!(
                 ref_pos += n
             elseif op == OP_MATCH
                 for i = 0:(n-1)
-                    corr_pos = ref_positions[ref_pos+i]
                     add!(
-                        position_counters[corr_pos],
+                        position_counters[ref_pos+i],
                         sequence[pos+i],
                         (10^(quality[pos+i] / 10)),
                     )
-                    depth[corr_pos] += 1
+                    depth[ref_pos+i] += 1
                 end
                 pos += n
                 ref_pos += n
             end
 
         end
-        reference_counters[refname] += 1
     end
 
     for pos in eachindex(consensus)
@@ -124,16 +99,7 @@ function make_consensus!(
         end
     end
 
-    # add reference gaps
-    most_used_refname = last(findmax(reference_counters))
-    most_used_ref = references[most_used_refname]
-    for i in eachindex(most_used_ref)
-        if most_used_ref[i] == DNA_Gap
-            consensus[i] = DNA_Gap
-        end
-    end
-
-    return consensus, depth, most_used_refname
+    return consensus, depth, refname
 end
 
 
@@ -203,23 +169,6 @@ function load_references(references_filename::String)::Dict{String,LongSequence}
     end
 
     return references
-end
-
-
-"""
-    get_reference_position_maps(sequence)
-
-Get "new" positions from old positions using gaps
-"""
-function get_reference_position_maps(sequence::LongSequence)::Vector{Int64}
-    maps = Int64[]
-    for (i, x) in enumerate(sequence)
-        if x != DNA_Gap
-            push!(maps, i)
-        end
-    end
-
-    return maps
 end
 
 
