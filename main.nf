@@ -100,7 +100,8 @@ workflow PrepareReferences {
     // save reference in output
     references
       .collectFile(storeDir: 'output/references/fasta') {
-        [it[2], it[2].text] }
+        [it[2].name, it[2].text]
+      }
 
     // prepare references
     references
