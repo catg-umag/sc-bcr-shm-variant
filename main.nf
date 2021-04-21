@@ -620,7 +620,8 @@ process getShmPlaces {
   label 'julia'
 
   input:
-  tuple val(name), path(consensus_summary), path(cell_consensus), path(reference_regions)
+  tuple val(name), path('consensus_summary.csv'), \
+    path('cell_consensus.csv'), path('reference_regions.csv')
 
   output:
   tuple val(name), path("${name}_shm.csv")
@@ -628,7 +629,8 @@ process getShmPlaces {
   script:
   subject = name - ~/_[HKL]/
   """
-  get_shm_places.jl -i $consensus_summary -c $cell_consensus -g $reference_regions -o ${name}_shm.csv
+  get_shm_places.jl -i consensus_summary.csv -o ${name}_shm.csv \
+    -c cell_consensus.csv -g reference_regions.csv
   """
 }
 
