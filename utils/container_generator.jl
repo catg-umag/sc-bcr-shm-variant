@@ -5,6 +5,7 @@ mkpath("container")
 cd("container")
 
 pkgs = [
+    (name = "ArgMacros", version = "0.2.3")
     (name = "ArgParse", version = "1.1.4")
     (name = "BioAlignments", version = "2.0.0")
     (name = "BioSequences", version = "2.0.5")
@@ -14,6 +15,7 @@ pkgs = [
     (name = "Edlib", version = "0.1.1")
     (name = "FASTX", version = "1.1.3")
     (name = "JSON", version = "0.21.1")
+    (name = "Query", version = "1.0.0")
     (name = "XAM", version = "0.2.7")
 ]
 no_test = [x.name for x in pkgs]

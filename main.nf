@@ -35,7 +35,12 @@ workflow {
 
   Preprocessing(reads, cell_index, cell_whitelist)
   PrepareReferences(Preprocessing.out, references)
-  BuildConsensus(PrepareReferences.out.reads, PrepareReferences.out.references, references)
+  BuildConsensus(
+    PrepareReferences.out.reads,
+    PrepareReferences.out.references,
+    PrepareReferences.out.cell_references,
+    references
+  )
 
   // filterConsensus.out
   //   .map { [it.baseName.replaceAll(/_.*/, ""), it] }
@@ -145,6 +150,7 @@ workflow PrepareReferences {
   emit:
     reads = splitted_reads
     references = splitted_references 
+    cell_references = selectReference.out.flatMap { it[1].collect { x -> [x.baseName, x] } }
 }
 
 
@@ -152,6 +158,7 @@ workflow BuildConsensus {
   take:
     splitted_reads
     splitted_references
+    cell_references
     references
 
   main:
@@ -181,7 +188,13 @@ workflow BuildConsensus {
       .set { consensus_pre_info }
 
     makeConsensus(consensus_pre_info)
-      | (filterConsensus & getShmPlaces)
+      | filterConsensus
+
+    getShmPlaces(
+      makeConsensus.out
+        .join(cell_references)
+        .join(getReferenceRegions.out)
+    )
 }
 
 
@@ -466,6 +479,9 @@ process sortAndConvert {
 }
 
 
+/*
+ * Select best reference 
+ */
 process selectReference {
   tag "$subject"
   label 'julia'
@@ -486,6 +502,9 @@ process selectReference {
 }
 
 
+/*
+ * Splits FASTQ file depending the reference assigned to each cell
+ */
 process splitFastqByReference {
   tag "$subject_chain"
   label 'julia'
@@ -507,6 +526,9 @@ process splitFastqByReference {
 }
 
 
+/*
+ * Merge BAM files from same subject/chain
+ */
 process mergeBams {
   tag "$subject_chain"
   label 'samtools'
@@ -589,13 +611,16 @@ process filterConsensus {
 }
 
 
+/*
+ * Get possible SHM places
+ */
 process getShmPlaces {
   tag "$name"
   publishDir "output/shm/${subject}", mode: 'copy'
-  label 'pandas'
+  label 'julia'
 
   input:
-  tuple val(name), path(consensus_summary)
+  tuple val(name), path(consensus_summary), path(cell_consensus), path(reference_regions)
 
   output:
   tuple val(name), path("${name}_shm.csv")
@@ -603,7 +628,7 @@ process getShmPlaces {
   script:
   subject = name - ~/_[HKL]/
   """
-  get_shm_places.py -i $consensus_summary -o ${name}_shm.csv
+  get_shm_places.jl -i $consensus_summary -c $cell_consensus -g $reference_regions -o ${name}_shm.csv
   """
 }
 
@@ -625,7 +650,7 @@ process searchSequences {
   
   script:
   subject_chain = own_consensus.baseName - ~/_sorted/
-  subject = subject_chain - ~/_[HL]C/
+  subject = subject_chain - ~/_[HKL]/
   """
   export JULIA_NUM_THREADS=${task.cpus}
   search_cells.jl -o ${subject_chain}.csv -d ${params.consensus_max_dist} \
