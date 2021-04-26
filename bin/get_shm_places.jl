@@ -21,7 +21,7 @@ function main()
         data |>
         @groupby(_.cell) |>
         @map({cell = key(_), n = length(_)}) |>
-        @filter(_.n > args.min_umis) |>
+        @filter(_.n >= args.min_umis) |>
         @map(_.cell) |>
         collect
 
