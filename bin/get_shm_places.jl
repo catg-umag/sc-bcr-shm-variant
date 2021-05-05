@@ -43,10 +43,9 @@ function main()
 
                 if length(nucleotides) >= args.min_umis && ratios[2] >= args.min_ratio
                     region = get_variant_region(i, reference_regions[cell_references[cell]])
-                    if region == "V"
-                        position_in_v =
-                            i - reference_regions[cell_references[cell]]["V"][1] + 1
-                    end
+                    position_in_v =
+                        region == "V" ?
+                        i - reference_regions[cell_references[cell]]["V"][1] + 1 : nothing
 
                     for (umi, seq, d) in zip(umis, sequences, depths)
                         if seq[i] in "ACGT"
