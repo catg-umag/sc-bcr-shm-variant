@@ -20,7 +20,7 @@ pkgs = [
 ]
 no_test = [x.name for x in pkgs]
 
-julia_version = v"1.6.0"
+julia_version = v"1.6.1"
 parent_image = "debian:10"
 apt_override = String[
     # absolutely necessary
@@ -44,7 +44,7 @@ SimpleContainerGenerator.create_dockerfile(
     no_test = no_test,
     julia_version = julia_version,
     parent_image = parent_image,
-    override_default_apt = apt_override
+    override_default_apt = apt_override,
 )
 
 

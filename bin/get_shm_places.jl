@@ -43,10 +43,26 @@ function main()
 
                 if length(nucleotides) >= args.min_umis && ratios[2] >= args.min_ratio
                     region = get_variant_region(i, reference_regions[cell_references[cell]])
+                    if region == "V"
+                        position_in_v =
+                            i - reference_regions[cell_references[cell]]["V"][1] + 1
+                    end
 
                     for (umi, seq, d) in zip(umis, sequences, depths)
                         if seq[i] in "ACGT"
-                            push!(variants, (cell, umi, i, cons_nucl, seq[i], d[i], region))
+                            push!(
+                                variants,
+                                (
+                                    cell,
+                                    umi,
+                                    i,
+                                    cons_nucl,
+                                    seq[i],
+                                    d[i],
+                                    region,
+                                    position_in_v,
+                                ),
+                            )
                         end
                     end
                 end
@@ -56,7 +72,7 @@ function main()
 
     # write 
     open(args.output, "w") do f
-        write(f, "cell,umi,position,cons_nucl,nucl,depth,region\n")
+        write(f, "cell,umi,position,cons_nucl,nucl,depth,region,vgene_position\n")
         for v in variants
             write(f, join(string.(v), ",") * "\n")
         end

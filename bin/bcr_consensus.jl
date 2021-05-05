@@ -76,7 +76,7 @@ function make_consensus!(
                 pos += n
             elseif op == OP_DELETE
                 ref_pos += n
-            elseif op == OP_MATCH
+            elseif op in (OP_MATCH, OP_SEQ_MATCH, OP_SEQ_MISMATCH)
                 for i = 0:(n-1)
                     add!(
                         position_counters[ref_pos+i],
