@@ -26,10 +26,10 @@ channel
   .map { ["${it.experiment}_L${it.lane}", [file(it.r1), file(it.r2)]]}
   .set { reads }
 
-channel
-  .fromPath(params.external_consensus_path)
-  .map { [it.baseName, it] }
-  .set { external_consensus_with_name }
+// channel
+//   .fromPath(params.external_consensus_path)
+//   .map { [it.baseName, it] }
+//   .set { external_consensus_with_name }
 
 
 /*
