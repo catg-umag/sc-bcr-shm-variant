@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 using Base.Threads
-using ArgParse, BioAlignments, BioSequences, DataStructures, CSV, FASTX, XAM
+using ArgMacros, BioAlignments, BioSequences, DataStructures, CSV, FASTX, XAM
 
 
 include("../lib/julia/dna_counter.jl")
@@ -11,11 +11,11 @@ function main()
     args = parse_arguments()
 
     # load data
-    references = load_references(args["references"])
-    records = load_records(args["bamfile"], Set(keys(references)))
-    regions = load_regions(args["reference_regions"])
+    references = load_references(args.references)
+    records = load_records(args.bamfile, Set(keys(references)))
+    regions = load_regions(args.reference_regions)
 
-    open(args["output"], "w") do f
+    open(args.output, "w") do f
         write(
             f,
             "cell,umi,nreads,ref_vdj_coverage,ref_cdr_coverage,consensus,aligned_consensus,depths\n",
@@ -216,26 +216,29 @@ end
 
 
 function parse_arguments()
-    s = ArgParseSettings(description = "Make consensus by Cell/UMI")
+    args = @tuplearguments begin
+        @helpusage """
+            bcr_consensus.jl -i BAMFILE -r REFERENCES
+                -g REFERENCE_REGIONS [-o OUTPUT]"""
+        @helpdescription "Make consensus by Cell/UMI"
 
-    @add_arg_table! s begin
-        #! format: off
-        "--output", "-o"
-            help = "output file (.csv)"
-            default = "consensus.csv"
-        "bamfile"
-            help = "BAM file containing reads"
-            required = true
-        "references"
-            help = "FASTA file containing aligned reference sequences"
-            required = true
-        "reference_regions"
-            help = "CSV file containing VDJ and CDR region positions"
-            required = true
-        #! format: on
+        @argumentrequired String bamfile "-i" "--input-bamfile"
+        @arghelp "input BAM file"
+        @argtest bamfile isfile "The bamfile argument must be a valid file"
+
+        @argumentrequired String references "-r" "--references"
+        @arghelp "reference sequences (FASTA)"
+        @argtest references isfile "The references argument must be a valid file"
+
+        @argumentrequired String reference_regions "-g" "--reference-regions"
+        @arghelp "file containing VDJ and CDR region positions (.csv)"
+        @argtest reference_regions isfile "The reference_regions argument must be a valid file"
+
+        @argumentdefault String "consensus.csv" output "-o" "--output"
+        @arghelp "output file (.csv)"
     end
 
-    return parse_args(s)
+    return args
 end
 
 main()

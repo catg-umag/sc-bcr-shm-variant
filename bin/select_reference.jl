@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-using ArgParse, XAM
+using ArgMacros, XAM
 
 RefCounts = Dict{String,Dict{String,Integer}}
 
@@ -7,11 +7,11 @@ RefCounts = Dict{String,Dict{String,Integer}}
 function main()
     args = parse_arguments()
 
-    counts = load_counts(args["bamfile"])
+    counts = load_counts(args.bamfile)
 
     best_references = get_best_references(counts)
 
-    open(args["output_heavy"], "w") do f
+    open(args.output_heavy, "w") do f
         write(f, "cell,reference\n")
         for row in best_references
             if row[2] != ""
@@ -20,7 +20,7 @@ function main()
         end
     end
 
-    open(args["output_light"], "w") do f
+    open(args.output_light, "w") do f
         write(f, "cell,reference\n")
         for row in best_references
             if row[3] != ""
@@ -92,25 +92,22 @@ end
 
 
 function parse_arguments()
-    s = ArgParseSettings(description = "Selects the best reference for each cell")
+    args = @tuplearguments begin
+        @helpusage "select_reference.jl -i BAMFILE -o OUTBASE"
+        @helpdescription "Selects the best reference for each cell"
 
-    @add_arg_table! s begin
-        #! format: off
-        "--bamfile", "-i"
-            help = "input file (.bam)"
-            required = true
-        "--output-heavy", "-H"
-            help = "output file for heavy chain (.csv)"
-            required = true
-            dest_name = "output_heavy"
-        "--output-light", "-L"
-            help = "output file for light chain (.csv)"
-            required = true
-            dest_name = "output_light"
-        #! format: on
+        @argumentrequired String bamfile "-i" "--bamfile"
+        @arghelp "input file (.bam)"
+        @argtest bamfile isfile "The input file must be a valid file"
+
+        @argumentrequired String output_heavy "-H" "--output-heavy"
+        @arghelp "Output file for heavy chains (.csv)"
+
+        @argumentrequired String output_light "-L" "--output-light"
+        @arghelp "Output file for light chains (.csv)"
     end
 
-    return parse_args(s)
+    return args
 end
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-using ArgParse, CodecZlib, CSV, FASTX
+using ArgMacros, CodecZlib, CSV, FASTX
 
 include("../lib/julia/barcode_correction.jl")
 
@@ -9,14 +9,14 @@ function main()
 
     references = Dict(
         x.cell => x.reference for
-        x in CSV.File(args["reference_index"]) if x.reference != ""
+        x in CSV.File(args.index) if x.reference != ""
     )
 
-    mkpath(args["output_dir"])
+    mkpath(args.output_dir)
 
     readers = (
-        r1 = FASTQ.Reader(auto_gzopen(args["input_r1"])),
-        r2 = FASTQ.Reader(auto_gzopen(args["input_r2"])),
+        r1 = FASTQ.Reader(auto_gzopen(args.reads_r1)),
+        r2 = FASTQ.Reader(auto_gzopen(args.reads_r2)),
     )
     writers = Dict()
 
@@ -31,8 +31,8 @@ function main()
             reference = references[cell]
             if !haskey(writers, reference)
                 output_base =
-                    "$(args["output_dir"])/" *
-                    replace(args["input_r1"], r"^.*/|\..*$" => "") *
+                    "$(args.output_dir)/" *
+                    replace(args.reads_r1, r"^.*/|\..*$" => "") *
                     "--$(reference)"
                 writers[reference] = (
                     r1 = FASTQ.Writer(open("$(output_base).r1.fastq", "w")),
@@ -53,24 +53,29 @@ end
 
 
 function parse_arguments()
-    s = ArgParseSettings(description = "Splits FASTQ files by best reference")
+    args = @tuplearguments begin
+        @helpusage """
+        split_fastq_by_reference.jl --r1 FASTQ_R1 --r2 FASTQ_R2
+            -i INDEX [-o OUTPUT_DIR]"""
+        @helpdescription "Splits FASTQ files by best reference"
 
-    @add_arg_table! s begin
-        #! format: off
-        "input_r1"
-            help = "FASTQ file (R1)"
-        "input_r2"
-            help = "FASTQ file (R2)"
-        "reference_index"
-            help = "File with each cell and its corresponding reference (.csv)"
-        "--output-dir", "-o"
-            help = "Output directory"
-            default = "."
-            dest_name = "output_dir"
-        #! format: on
+        @argumentrequired String reads_r1 "--r1"
+        @arghelp "R1 reads"
+        @argtest reads_r1 isfile "The R1 argument must be a valid file"
+
+        @argumentrequired String reads_r2 "--r2"
+        @arghelp "R2 reads"
+        @argtest reads_r2 isfile "The R2 argument must be a valid file"
+
+        @argumentrequired String index "-i" "--reference-index"
+        @arghelp "file with each cell and its corresponding reference (.csv)"
+        @argtest index isfile "The index argument must be a valid file"
+
+        @argumentdefault String "." output_dir "-o" "--output-dir"
+        @arghelp "output directory"
     end
 
-    return parse_args(s)
+    return args
 end
 
 

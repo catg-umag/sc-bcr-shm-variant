@@ -191,7 +191,6 @@ function parse_arguments()
         @argumentdefault Float64 0.0 min_ratio "-r" "--min-ratio"
         @arghelp "minimum alt allele ratio to consider it a valid case"
         @argtest min_ratio ratio_validator "Value must be between 0 and 0.5"
-
     end
 
     return args

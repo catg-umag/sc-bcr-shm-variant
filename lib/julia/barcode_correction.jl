@@ -13,7 +13,7 @@ SeqOrNothing = Union{LongSequence,Nothing}
 
 
 @inline function get_barcode_seq(record::FASTQ.Record)::LongSequence
-    return @view FASTX.sequence(record)[1:16]
+    return @view FASTQ.sequence(record)[1:16]
 end
 
 
@@ -23,19 +23,23 @@ end
 
 
 @inline function get_umi_seq(record::FASTQ.Record)::LongSequence
-    return @view FASTX.sequence(record)[17:26]
+    return @view FASTQ.sequence(record)[17:26]
 end
 
 
-@inline function get_barcodes_seqs_as_str(record::FASTQ.Record)::Tuple{String, String}
-    sequence = FASTX.sequence(record)
+@inline function get_barcodes_seqs_as_str(record::FASTQ.Record)::Tuple{String,String}
+    sequence = FASTQ.sequence(record)
     return (string(@view sequence[1:16]), string(@view sequence[17:26]))
 end
 
 
-@inline function auto_gzopen(filepath)
-    return endswith(filepath, ".gz") ? GzipDecompressorStream(open(filepath)) :
-           open(filepath)
+@inline function auto_gzopen(filepath::String; mode::String = "r")
+    if endswith(filepath, ".gz")
+        stream = mode == "r" ? GzipDecompressorStream : GzipCompressorStream
+        return stream(open(filepath, mode))
+    else
+        return open(filepath, mode)
+    end
 end
 
 
@@ -199,10 +203,10 @@ function correct_umis(umi_counts::UmiCounts)::Dict{LongSequence,LongSequence}
     dna_bases = [DNA_A, DNA_C, DNA_G, DNA_T]
     test_umi = dna""
 
-    for (umi, count) in umi_counts
+    for (umi, nreads) in umi_counts
         # make the original as the best by default
         best_dest_umi = umi
-        best_dest_count = count
+        best_dest_count = nreads
         for (i, nucl) in enumerate(umi)
             for dna_base in dna_bases
                 if nucl != dna_base
