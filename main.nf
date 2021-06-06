@@ -26,11 +26,6 @@ channel
   .map { ["${it.experiment}_L${it.lane}", [file(it.r1), file(it.r2)]]}
   .set { reads }
 
-// channel
-//   .fromPath(params.external_consensus_path)
-//   .map { [it.baseName, it] }
-//   .set { external_consensus_with_name }
-
 
 /*
  * Workflow
@@ -42,8 +37,9 @@ workflow {
 
   PreselectReferences(
     Preprocessing.out,
-    PrepareReferences.out.by_subject,
-    PrepareReferences.out.by_subject_chain
+    PrepareReferences.out.by_subject_chain,
+    PrepareReferences.out.single,
+    PrepareReferences.out.multi,
   )
 
   BuildConsensus(

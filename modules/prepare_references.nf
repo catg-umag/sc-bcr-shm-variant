@@ -14,32 +14,40 @@ workflow PrepareReferences {
       | map { [it.baseName, it] }
       | set { references_by_subject_chain }
 
-    references_by_subject_chain
-      | collectFile() {
-          ["${it[0] - ~/-[HL]C/}.fasta", it[1].text]
-        }
-      | map { [it.baseName, it]}
-      | set { references_by_subject}
-
     // write references in output directory
     references_by_subject_chain
       | map { it[1] }
       | collectFile(storeDir: 'output/references/fasta')
 
     references_by_subject_chain
-      | (referenceAlignment & getReferenceRegions)
+      | getReferenceRegions
 
     references_by_subject_chain
       | separateReferences
-      | flatMap { it[1].collect { x -> [it[0], x.baseName, x] } }
+      | branch {
+          multi: it[1] instanceof List
+            return it[1].collect { x -> [it[0], x.baseName, x] }
+          single: true
+            return [[it[0], it[1].baseName, it[1]]]
+        }
+      | mix
+      | flatMap
       | set { splitted_references }
 
+    references_by_subject_chain
+      | map { [it[0], it[1].text.findAll(">").size()] }
+      | branch {
+          single: it[1] == 1
+          multi:  it[1] > 1
+        }
+      | set { reference_counts }
+
   emit:
-    by_subject = references_by_subject
     by_subject_chain = references_by_subject_chain
     splitted = splitted_references
     regions = getReferenceRegions.out
-    alignment = referenceAlignment.out
+    single = reference_counts.single.map { it[0] }
+    multi = reference_counts.multi.map { it[0] }
 }
 
 

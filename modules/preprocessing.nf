@@ -37,7 +37,7 @@ process extractBarcodes {
   publishDir "output/bc_corrections/", pattern: '*.json', mode: 'copy'
   label 'julia'
   cpus 2
-  memory 10.GB
+  memory 16.GB
 
   input:
   tuple val(name), path(reads)
@@ -67,7 +67,7 @@ process sequenceCleanup {
   tag "$name"
   label 'fastp'
   publishDir 'output/qc/fastp/', pattern: "${name}_report*", mode: 'copy'
-  cpus 4
+  cpus 8
 
   input:
   tuple val(name), path(fastq_r1), path(fastq_r2)

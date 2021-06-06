@@ -16,7 +16,7 @@ workflow BuildConsensus {
       | map { ["${it[0]}--${it[1]}", it[2], it[3] ] }
       | multiMap {
           reads: it
-          ncpus: 1
+          ncpus: 2
         }
       | mappingMinimap2
       | sortAndConvert

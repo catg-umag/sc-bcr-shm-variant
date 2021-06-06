@@ -11,20 +11,11 @@ function main()
 
     best_references = get_best_references(counts)
 
-    open(args.output_heavy, "w") do f
+    open(args.output, "w") do f
         write(f, "cell,reference\n")
         for row in best_references
             if row[2] != ""
                 write(f, "$(row[1]),$(row[2])\n")
-            end
-        end
-    end
-
-    open(args.output_light, "w") do f
-        write(f, "cell,reference\n")
-        for row in best_references
-            if row[3] != ""
-                write(f, "$(row[1]),$(row[3])\n")
             end
         end
     end
@@ -69,20 +60,15 @@ For each cell, select the references (heavy and light) with the max count
 function get_best_references(counts::RefCounts)
     cell_best_refs = []
     for (cell, counts) in counts
-        bests = Dict(
-            :heavy => Dict(:name => "", :count => 0),
-            :light => Dict(:name => "", :count => 0),
-        )
+        bests = Dict(:name => "", :count => 0)
         for (refname, count) in counts
-            chain = split(refname, "_")[3]
-            chain_type = chain == "H" ? :heavy : :light
 
-            if bests[chain_type][:count] < count
-                bests[chain_type][:name] = refname
-                bests[chain_type][:count] = count
+            if bests[:count] < count
+                bests[:name] = refname
+                bests[:count] = count
             end
         end
-        push!(cell_best_refs, [cell, bests[:heavy][:name], bests[:light][:name]])
+        push!(cell_best_refs, [cell, bests[:name]])
     end
     
     sort!(cell_best_refs, by = x -> x[1])
@@ -100,15 +86,14 @@ function parse_arguments()
         @arghelp "input file (.bam)"
         @argtest bamfile isfile "The input file must be a valid file"
 
-        @argumentrequired String output_heavy "-H" "--output-heavy"
-        @arghelp "Output file for heavy chains (.csv)"
-
-        @argumentrequired String output_light "-L" "--output-light"
-        @arghelp "Output file for light chains (.csv)"
+        @argumentrequired String output "-o" "--output"
+        @arghelp "Output file (.csv)"
     end
 
     return args
 end
 
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
