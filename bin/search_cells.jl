@@ -181,4 +181,6 @@ function parse_arguments()
 end
 
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end

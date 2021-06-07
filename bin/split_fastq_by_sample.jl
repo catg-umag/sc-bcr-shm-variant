@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-using ArgParse, CSV, JSON
+using ArgMacros, CSV, FASTX, JSON
 
 include("../lib/julia/barcode_correction.jl")
 include("../lib/julia/paired_fastq_writer.jl")
@@ -9,31 +9,30 @@ function main()
     args = parse_arguments()
 
     # load data
-    subjects_from_cell = load_subject_index(args["index"], args["experiment"])
+    subjects_from_cell = load_subject_index(args.index, args.experiment)
     subjects = collect(Set(values(subjects_from_cell)))
 
     # prepare writers
-    mkpath(args["output_dir"])
+    mkpath(args.output_dir)
     fastq_writers = Dict(
         subject =>
-            PairedFastqWriter("$(args["output_dir"])/$(args["experiment"])_$(subject)")
+            PairedFastqWriter("$(args.output_dir)/$(args.experiment)_$(subject)")
         for subject in vcat(subjects, "NA")
     )
 
-    for (barcodes, r1, r2) in zip(
-        CSV.File(args["barcodes"]),
-        FASTQ.Reader(auto_gzopen(args["reads_r1"])),
-        FASTQ.Reader(auto_gzopen(args["reads_r2"])),
+    for (r1, r2) in zip(
+        FASTQ.Reader(auto_gzopen(args.reads_r1)),
+        FASTQ.Reader(auto_gzopen(args.reads_r2)),
     )
-        cell = barcodes.cell
+        cellbc, umi = split(FASTX.identifier(r1), ":")[end-1: end]
 
-        if !isnothing(cell) && haskey(subjects_from_cell, cell)
-            subject = subjects_from_cell[cell]
+        if !isnothing(cellbc) && haskey(subjects_from_cell, cellbc)
+            subject = subjects_from_cell[cellbc]
         else
             subject = "NA"
         end
 
-        write_record(fastq_writers[subject], r1, r2, args["experiment"], cell, barcodes.umi)
+        write_record(fastq_writers[subject], r1, r2, args.experiment, string(cellbc), string(umi))
     end
 
     # close writers
@@ -57,37 +56,36 @@ end
 
 
 function parse_arguments()
-    s = ArgParseSettings(description = "Splits FASTQ files by subject")
+    args = @tuplearguments begin
+        @helpusage """
+            split_fastq_by_sample.jl --r1 FASTQ_R1 --r2 FASTQ_R2
+                -i INDEX -n EXP_NAME [-o OUTPUT_DIR]"""
+        @helpdescription "Splits FASTQ files by subject"
 
-    @add_arg_table! s begin
-        #! format: off
-        "--output-dir", "-o"
-            help = "output directory"
-            default = "."
-            dest_name = "output_dir"
-        "--r1"
-            help = "R1 reads"
-            dest_name = "reads_r1"
-            required = true
-        "--r2"
-            help = "R2 reads"
-            dest_name = "reads_r2"
-            required = true
-        "--barcodes", "-b"
-            help = "Cell/UMI barcodes in a CSV file"
-            required = true
-        "--index", "-i"
-            help = "experiment/cell/cluster index"
-            required = true
-        "--experiment-name", "-n"
-            help = "experiment name"
-            required = true
-            dest_name = "experiment"
-        #! format: on
+        @argumentrequired String reads_r1 "--r1"
+        @arghelp "R1 reads"
+        @argtest reads_r1 isfile "The R1 argument must be a valid file"
+
+        @argumentrequired String reads_r2 "--r2"
+        @arghelp "R2 reads"
+        @argtest reads_r2 isfile "The R2 argument must be a valid file"
+
+        @argumentrequired String index "-i" "--index"
+        @arghelp "experiment/cell/cluster index"
+        @argtest index isfile "The index argument must be a valid file"
+
+        @argumentrequired String experiment "-n" "--experiment-name"
+        @arghelp "experiment name"
+
+        @argumentdefault String "." output_dir "-o" "--output-dir"
+        @arghelp "output directory"
     end
 
-    return parse_args(s)
+    return args
 end
 
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
+
