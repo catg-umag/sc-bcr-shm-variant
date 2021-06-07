@@ -52,6 +52,7 @@ workflow {
   AnalyzeConsensus(
     BuildConsensus.out,
     PreselectReferences.out.cell_references,
-    PrepareReferences.out.regions
+    PrepareReferences.out.regions,
+    PrepareReferences.out.aligned_v
   )
 }

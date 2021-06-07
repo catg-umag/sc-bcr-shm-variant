@@ -28,6 +28,9 @@ def main():
                 "cdr2_end",
                 "cdr3_start",
                 "cdr3_end",
+                "v_sequence",
+                "d_sequence",
+                "j_sequence",
             ]
         )
 
@@ -48,8 +51,16 @@ def main():
             "cdr3_start",
             "cdr3_end",
         ]
+        seq_columns = [
+            "v_sequence_alignment",
+            "d_sequence_alignment",
+            "j_sequence_alignment",
+        ]
         for row in reader:
-            writer.writerow([row[x] for x in columns])
+            writer.writerow(
+                [row[x] for x in columns]
+                + [row[x].replace("-", "") for x in seq_columns]
+            )
 
 
 def parse_arguments():

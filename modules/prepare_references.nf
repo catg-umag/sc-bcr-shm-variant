@@ -19,9 +19,14 @@ workflow PrepareReferences {
       | map { it[1] }
       | collectFile(storeDir: 'output/references/fasta')
 
+    // get reference regions and alignments
     references_by_subject_chain
-      | getReferenceRegions
+      | (referenceAlignment & getReferenceRegions)
+    
+    getReferenceRegions.out
+      | getAlignedVGene
 
+    // separate references
     references_by_subject_chain
       | separateReferences
       | branch {
@@ -34,6 +39,7 @@ workflow PrepareReferences {
       | flatMap
       | set { splitted_references }
 
+    // count references
     references_by_subject_chain
       | map { [it[0], it[1].text.findAll(">").size()] }
       | branch {
@@ -48,6 +54,7 @@ workflow PrepareReferences {
     regions = getReferenceRegions.out
     single = reference_counts.single.map { it[0] }
     multi = reference_counts.multi.map { it[0] }
+    aligned_v = getAlignedVGene.out
 }
 
 
@@ -57,7 +64,7 @@ workflow PrepareReferences {
 process referenceAlignment {
   tag "$name"
   label 'clustalo'
-  publishDir "output/references/msa", mode: 'copy'
+  publishDir "output/references/msa_complete", mode: 'copy'
   
   input:
   tuple val(name), path(references)
@@ -67,7 +74,11 @@ process referenceAlignment {
 
   script:
   """
-  clustalo -i $references --wrap 10000 > ${name}_msa.fasta 
+  if [[ \$(grep '>' $references | wc -l) -gt 2 ]]; then
+    clustalo -i $references --wrap 10000 > ${name}_msa.fasta 
+  else
+    cat $references > ${name}_msa.fasta 
+  fi
   """
 }
 
@@ -97,6 +108,9 @@ process getReferenceRegions {
 }
 
 
+/*
+ * Separate each sequence in FASTA file
+ */
 process separateReferences {
   tag "$name"
   label 'fasplit'
@@ -111,5 +125,31 @@ process separateReferences {
   """
   mkdir ${name}/
   faSplit byname $references ${name}/ 
+  """
+}
+
+  
+/*
+ * Extract V regions and align (MSA) them
+ */
+process getAlignedVGene {
+  tag "$name"
+  label 'clustalo'
+  publishDir "output/references/msa_vgene", mode: 'copy'
+
+  input:
+  tuple val(name), path(reference_regions)
+  
+  output:
+  tuple val(name), path("${name}.Vmsa.fasta")
+
+  script:
+  """
+  if [[ \$(wc -l < $reference_regions) -gt 2 ]]; then
+    v_sequence_fasta.sh $reference_regions \
+      | clustalo -i - -o ${name}.Vmsa.fasta --wrap 10000
+  else
+    v_sequence_fasta.sh $reference_regions > ${name}.Vmsa.fasta
+  fi
   """
 }
