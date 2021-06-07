@@ -12,13 +12,14 @@ process mappingMinimap2 {
 
   input:
   tuple val(name), path(reads), path(reference)
-  val(ncpus)
+  val(step)
 
   output:
   tuple val(name), file("${name}.sam"), emit: sam
-  val(ncpus), emit: ncpus
+  val(step), emit: step
 
   script:
+  ncpus = step === 'pre' ? params.mapping_cpus_pre : params.mapping_cpus
   """
   minimap2 -ax sr -t ${task.cpus} $reference $reads > ${name}.sam
   """
@@ -35,12 +36,13 @@ process sortAndConvert {
 
   input:
   tuple val(name), path(sam)
-  val(ncpus)
+  val(step)
   
   output:
   tuple val(name), path("${name}.bam"), path("${name}.bam.bai")
   
   script:
+  ncpus = step === 'pre' ? params.mapping_cpus_pre : params.mapping_cpus
   """
   samtools sort -@ ${task.cpus} $sam -o ${name}.bam
   samtools index ${name}.bam

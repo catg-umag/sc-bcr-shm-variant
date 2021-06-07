@@ -21,7 +21,7 @@ workflow PreselectReferences {
       | map { ["${it[0]}-${it[1]}", it[3], it[2]] }
       | multiMap {
           reads: it
-          ncpus: 8
+          step: 'pre'
         }
       | mappingMinimap2
       | sortAndConvert
