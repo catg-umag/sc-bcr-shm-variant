@@ -1,0 +1,23 @@
+generate_dockerfile:
+  image: julia:latest
+  stage: .pre
+  script:
+    - julia -e 'using Pkg; Pkg.add("SimpleContainerGenerator")'
+    - julia scripts/container_generator.jl
+  artifacts:
+    paths:
+      - container
+
+build_and_push_image:
+  image: docker:latest
+  stage: build
+  services:
+    - docker:dind
+  dependencies:
+    - generate_dockerfile
+  variables:
+    IMAGE_TAG: $CI_REGISTRY_IMAGE
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - docker build -t $IMAGE_TAG:$CI_COMMIT_SHA -t $IMAGE_TAG:latest container/
+    - docker push $IMAGE_TAG
