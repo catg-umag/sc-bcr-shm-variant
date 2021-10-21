@@ -4,6 +4,9 @@ generate_dockerfile:
   script:
     - julia -e 'using Pkg; Pkg.add("SimpleContainerGenerator")'
     - julia scripts/container_generator.jl
+  only:
+    changes:
+      - scripts/container_generator.jl
   artifacts:
     paths:
       - container
@@ -13,11 +16,13 @@ build_and_push_image:
   stage: build
   services:
     - docker:dind
-  dependencies:
-    - generate_dockerfile
+  needs:
+    - job: generate_dockerfile
+      artifacts: true
   variables:
     IMAGE_TAG: $CI_REGISTRY_IMAGE
   script:
+    - export DATE=$(date +'%Y%m%d')
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
-    - docker build -t $IMAGE_TAG:$CI_COMMIT_SHA -t $IMAGE_TAG:latest container/
+    - docker build -t $IMAGE_TAG:$DATE -t $IMAGE_TAG:latest container/
     - docker push $IMAGE_TAG
