@@ -12,7 +12,7 @@ generate_dockerfile:
       - container
 
 build_and_push_image:
-  image: docker:stable
+  image: docker:latest
   stage: build
   services:
     - docker:dind
@@ -24,8 +24,9 @@ build_and_push_image:
       - scripts/container_generator.jl
   variables:
     IMAGE_TAG: $CI_REGISTRY_IMAGE
+    DOCKER_BUILDKIT: 1
   script:
     - export DATE=$(date +'%Y%m%d')
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
-    - DOCKER_BUILDKIT=1 docker build -t $IMAGE_TAG:$DATE -t $IMAGE_TAG:latest container/
+    - docker build -t $IMAGE_TAG:$DATE -t $IMAGE_TAG:latest container/
     - docker push -a $IMAGE_TAG
