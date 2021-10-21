@@ -28,4 +28,4 @@ build_and_push_image:
     - export DATE=$(date +'%Y%m%d')
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
     - docker build -t $IMAGE_TAG:$DATE -t $IMAGE_TAG:latest container/
-    - docker push $IMAGE_TAG
+    - docker push -a $IMAGE_TAG
