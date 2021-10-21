@@ -1,12 +1,12 @@
 generate_dockerfile:
   image: julia:latest
   stage: .pre
-  script:
-    - julia -e 'using Pkg; Pkg.add("SimpleContainerGenerator")'
-    - julia scripts/container_generator.jl
   only:
     changes:
       - scripts/container_generator.jl
+  script:
+    - julia -e 'using Pkg; Pkg.add("SimpleContainerGenerator")'
+    - julia scripts/container_generator.jl
   artifacts:
     paths:
       - container
@@ -19,6 +19,9 @@ build_and_push_image:
   needs:
     - job: generate_dockerfile
       artifacts: true
+  only:
+    changes:
+      - scripts/container_generator.jl
   variables:
     IMAGE_TAG: $CI_REGISTRY_IMAGE
   script:
