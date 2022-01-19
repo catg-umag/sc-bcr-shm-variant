@@ -1,5 +1,5 @@
 generate_dockerfile:
-  image: julia:1.6
+  image: julia:1.7
   stage: .pre
   only:
     changes:
