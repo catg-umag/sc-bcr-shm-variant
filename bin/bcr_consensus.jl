@@ -25,7 +25,7 @@ function main()
             cell_records = records[cell]
             for umi in keys(cell_records)
                 nrecords = length(cell_records[umi])
-                consensus, depths, refname = make_consensus!(cell_records[umi], references)
+                consensus, depths, refname = make_consensus(cell_records[umi], references)
                 cleaned_consensus = clean_consensus(consensus)
                 coverages = get_coverages(depths, regions[refname])
 
@@ -53,7 +53,7 @@ end
 Creates a consensus sequence by frequency, filling the gaps with the reference sequence.
 Returns the consensus and a vector with the depth for each reference position.
 """
-function make_consensus!(
+function make_consensus(
     records::Vector{BAM.Record},
     references::Dict{String,LongSequence},
 )::Tuple{Vector{DNA},Vector{Int64},String}
