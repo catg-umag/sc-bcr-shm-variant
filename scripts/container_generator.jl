@@ -10,7 +10,7 @@ pkgs = [
     (name = "BioAlignments", version = "2.0.0")
     (name = "BioSequences", version = "2.0.5")
     (name = "CodecZlib", version = "0.7.0")
-    (name = "CSV", version = "0.8.5")
+    (name = "CSV", version = "0.9.10")
     (name = "DataStructures", version = "0.18.10")
     (name = "Edlib", version = "0.1.1")
     (name = "FASTX", version = "1.2.0")
@@ -21,7 +21,7 @@ pkgs = [
 ]
 no_test = [x.name for x in pkgs]
 
-julia_version = v"1.6.3"
+julia_version = v"1.7.1"
 parent_image = "ubuntu:20.04"
 apt_override = String[
     # absolutely necessary
