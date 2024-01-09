@@ -1,3 +1,3 @@
-# Improving BCR receptor data from Single Cell (10x) Data
+# Snapshooting mutation events in single cell BCR
 
-CellRanger retrieves too few V(D)J rearrangements?
+This projects aims to detect ongoing mutations in single cell BCR data.
